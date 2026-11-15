@@ -103,9 +103,7 @@ export const useUtmTags = (projectId?: string) => {
 		queryKey: ["utm_tags", projectId],
 		enabled: projectId !== undefined,
 		queryFn: () =>
-			api["/api/dashboard/project/{project_id}/utm-tags"]
-				.get({ params: { project_id: projectId as string } })
-				.json(),
+			api["/api/dashboard/project/{project_id}/utm-tags"].get({ params: { project_id: projectId as string } }).json(),
 	});
 	return { utmTags: data?.utmTags ?? [], isLoading, error };
 };
@@ -128,7 +126,8 @@ export const useUtmTagSummary = ({ projectId, range }: { projectId?: string; ran
 	return { summaries: data ?? [], isLoading: isFetching, error };
 };
 
-export const useEntities = () => {	const { data, isLoading, error } = useQuery({
+export const useEntities = () => {
+	const { data, isLoading, error } = useQuery({
 		queryKey: ["entities"],
 		refetchOnMount: true,
 		retry: false,

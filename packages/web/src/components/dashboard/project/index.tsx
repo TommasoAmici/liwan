@@ -63,9 +63,7 @@ export const getDimensionFilter = (dimension: Dimension, value: string, property
 };
 
 export const Project = () => {
-	const [projectId] = useState(() =>
-		typeof window === "undefined" ? undefined : getDashboardProjectId(),
-	);
+	const [projectId] = useState(() => (typeof window === "undefined" ? undefined : getDashboardProjectId()));
 	const [filters, setFilters] = useState<DimensionFilter[]>(() =>
 		typeof window === "undefined" ? [] : parseReportFilters(window.location.search),
 	);
@@ -243,12 +241,12 @@ export const Project = () => {
 
 	return (
 		<div className={styles.project}>
-			<ProjectNav projectId={project.id} current="overview" />
 			<div className={styles.projectReport}>
 				<div className={styles.projectHeader}>
 					<ProjectHeader project={project} stats={stats} />
 					<SelectRange onSelect={selectRange} range={range} projectId={project.id} />
 				</div>
+				<ProjectNav projectId={project.id} current="overview" />
 				<SelectMetrics
 					className={styles.projectStats}
 					data={stats}

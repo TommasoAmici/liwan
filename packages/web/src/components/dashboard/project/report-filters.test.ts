@@ -53,9 +53,9 @@ describe("report filters in the URL", () => {
 
 	it("requires a key for property filters and strips keys from other dimensions", () => {
 		expect(parseReportFilters(search([{ dimension: "property", filterType: "equal", value: "pro" }]))).toEqual([]);
-		expect(parseReportFilters(search([{ dimension: "property", key: "  ", filterType: "equal", value: "pro" }]))).toEqual(
-			[],
-		);
+		expect(
+			parseReportFilters(search([{ dimension: "property", key: "  ", filterType: "equal", value: "pro" }])),
+		).toEqual([]);
 		expect(parseReportFilters(search([{ dimension: "path", key: "plan", filterType: "equal", value: "/" }]))).toEqual([
 			{ dimension: "path", filterType: "equal", inversed: undefined, strict: undefined, value: "/" },
 		]);

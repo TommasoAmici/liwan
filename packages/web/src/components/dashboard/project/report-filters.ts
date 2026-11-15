@@ -3,13 +3,10 @@ import { dimensions, filterNames } from "@/constants";
 
 const MAX_REPORT_FILTERS = 20;
 
-const valueFilterTypes = ["equal", "contains", "starts_with", "ends_with"] as const;
 const booleanFilterTypes = ["is_true", "is_false"] as const;
 
 const isFilterType = (value: unknown): value is FilterType =>
 	typeof value === "string" && Object.hasOwn(filterNames, value);
-
-const isValueFilterType = (value: FilterType) => (valueFilterTypes as readonly FilterType[]).includes(value);
 
 const isBooleanFilterType = (value: FilterType) => (booleanFilterTypes as readonly FilterType[]).includes(value);
 

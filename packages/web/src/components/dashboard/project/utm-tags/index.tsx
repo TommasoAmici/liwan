@@ -2,10 +2,10 @@ import styles from "./utm-tags.module.css";
 
 import { useMemo, useState } from "react";
 
-import { appPath, getDashboardProjectId } from "@/config";
-import type { DimensionFilter, UtmTag } from "@/constants";
 import { LoadingSpinner } from "@/components/ui/loading";
 import { CopyButton } from "@/components/ui/snippet";
+import { appPath, getDashboardProjectId } from "@/config";
+import type { DimensionFilter, UtmTag } from "@/constants";
 import { useMe, useProject, useUtmTagSummary, useUtmTags } from "@/hooks/api";
 import { useRange } from "@/hooks/persist";
 import { formatMetricVal, getUsername } from "@/utils";
@@ -83,11 +83,7 @@ export const UtmTags = () => {
 		</button>
 	);
 
-	const empty = error
-		? "Failed to load UTM tags."
-		: isAdmin
-			? adminEmpty
-			: viewerEmpty;
+	const empty = error ? "Failed to load UTM tags." : isAdmin ? adminEmpty : viewerEmpty;
 
 	return (
 		<div className={styles.screen}>
@@ -156,18 +152,10 @@ export const UtmTags = () => {
 													{href && <a href={href}>View traffic</a>}
 													{isAdmin && (
 														<>
-															<button
-																type="button"
-																className="button-ghost"
-																onClick={() => setEditor({ tag })}
-															>
+															<button type="button" className="button-ghost" onClick={() => setEditor({ tag })}>
 																Edit
 															</button>
-															<button
-																type="button"
-																className="button-ghost"
-																onClick={() => setDeleting(tag)}
-															>
+															<button type="button" className="button-ghost" onClick={() => setDeleting(tag)}>
 																Delete
 															</button>
 														</>
