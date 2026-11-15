@@ -382,6 +382,9 @@ overview, so the funnel is a report, not a separate configuration page.
   [2026-11-15-utm-tags.md](2026-11-15-utm-tags.md) adds its own Features
   paragraph and its own `### Features` bullet; keep both entries whichever plan
   ships first, and never replace one with the other.
+  [2026-11-15-duckdb-v2-followups.md](2026-11-15-duckdb-v2-followups.md) may
+  add `### Other` bullets and edit the same `## Upgrading` section; keep all
+  entries whichever plan ships first.
 
 ## Implementation context
 
@@ -557,3 +560,9 @@ plans also add entries to `constants.ts`, `hooks/api.ts`, `models.rs`,
 `app/mod.rs`, `LiwanProjects::delete`, `benches/reports.rs`,
 `astro.config.ts`, `README.md`, and `CHANGELOG.md`; those additions are
 additive and should be kept together.
+[2026-11-15-duckdb-v2-followups.md](2026-11-15-duckdb-v2-followups.md) may
+change the stored type of `properties` and the property filter SQL that
+`reports/shared.rs::build_filter_clause` emits. This plan's funnel filters go
+through that same function, so use it and select whatever column the filter
+names (including `properties`) in the `candidates` CTE; do not add a second
+property filter implementation for funnels.
