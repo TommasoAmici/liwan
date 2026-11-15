@@ -40,7 +40,7 @@ and two projects; `cargo dev reset-db` starts over.
 | Path | What lives there |
 |---|---|
 | `crates/liwan` | The server: `app/` (models, core services, reports), `web/` (Axum routes, embedded dashboard), `migrations/`, `config.rs`, `cli.rs` |
-| `crates/liwan/benches/reports.rs` | Criterion benchmarks for the report queries |
+| `crates/liwan/benches/` | Criterion benchmarks: `reports.rs` for report queries, `ingest.rs` for the writer and event request path |
 | `crates/liwan/tests` | Axum integration tests; `common/mod.rs` builds an in-memory app and test client |
 | `crates/api` | Rust client for ingesting events, with its own `CHANGELOG.md` |
 | `packages/web` | Astro + React dashboard, served from the binary (pages are prerendered) |

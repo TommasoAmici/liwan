@@ -428,6 +428,30 @@ Recorded events and reports are unchanged." No README, config example, or
 client change; no other slice earned a line because an operator cannot feel
 them.
 
+**Verification (2026-11-15).**
+
+- `mise run rust:lint` and `mise run rust:test` pass on the final tree.
+- Final `cargo bench -p liwan --bench ingest` on the M4 Pro: writer 6.40 ms
+  per 512-event batch (baseline 18.6 ms; appender-only case 1.04 ms), exits
+  9.26 ms for 100 (baseline 96.8 ms), classify 52 ns, UTM 432 ns (from 691),
+  visitor id 288 ns (from 313), empty hostname list 0.45 ns (from 15.3).
+- `tests/serve.rs`, `tests/admin.rs`, `tests/dashboard.rs`, `tests/auth.rs`,
+  and `tests/event.rs` pass. `app::db::tests::app_migrations_create_the_entity_index`
+  proves V11 applies to a fresh database.
+- Not run or not captured, and why: the report benchmark needs a seeded
+  checkout-local database and this worktree never created one (the report
+  changes add no claimed speed-up, and the ingest bench needs no seed); no
+  `EXPLAIN ANALYZE` was captured for `range_events_sql`; the `strobe`
+  page-load profile was replaced by the in-process 22.1 µs / 381 ns
+  measurement because the difference is below what a page load can resolve.
+  The V11 upgrade was not replayed against an existing V8 app database; the
+  migration is a single `create index` and the fresh-database test covers that
+  it runs, but an operator-facing upgrade check remains open.
+- The writer bench assertion accepts `appended >= 512` rather than exactly 512:
+  DuckDB did not remove every previous batch under the pooled connections, so a
+  few batches can remain in the recent window. It does not move the measured
+  time (6.4 ms across runs).
+
 **Decisions (2026-11-15, user answers).**
 
 - One umbrella plan for all findings, not one file per fix. The slices are
