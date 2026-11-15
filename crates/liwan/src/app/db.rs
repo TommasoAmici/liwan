@@ -185,4 +185,26 @@ mod tests {
             assert_eq!(storage_major(version), None, "{version:?}");
         }
     }
+
+    #[test]
+    fn fresh_database_is_written_in_the_v2_storage_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = super::init_duckdb(
+            &dir.path().join("liwan-events.duckdb"),
+            crate::config::DuckdbConfig::default(),
+            super::super::embedded::events::migrations::runner(),
+        )
+        .unwrap();
+
+        let version: String = pool
+            .get()
+            .unwrap()
+            .query_row(
+                "SELECT tags['storage_version'] FROM duckdb_databases() WHERE database_name NOT IN ('system', 'temp')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(version.starts_with("v2."), "fresh database uses {version}");
+    }
 }
