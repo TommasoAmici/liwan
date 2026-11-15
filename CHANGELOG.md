@@ -16,6 +16,22 @@ The format is roughly based on the output of `git-cliff` and this project adhere
 Since this is not a library, this changelog focuses on the changes that are relevant to the end-users. For a detailed list of changes, see the commit history, which adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). New releases are created automatically when a new tag is pushed (Commit message: chore(release): vX.X.X).
 -->
 
+## [Unreleased]
+
+### Features
+
+- `upgrade-duckdb` rewrites the event database into the storage format Liwan
+  now uses. Updating Liwan does not convert anything by itself, and databases
+  created by earlier versions keep working without the conversion. Stop Liwan
+  before running it; the original is kept beside the converted database with an
+  `.old` suffix. The conversion is one-way, so a converted database does not
+  open in a Liwan release that bundles the older engine.
+
+### Other
+
+- Liwan now bundles DuckDB 2.0. Databases created by earlier versions keep
+  working without changes.
+
 ## [v1.8.1] - 2026-10-23
 
 ### Security
