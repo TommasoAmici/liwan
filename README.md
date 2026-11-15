@@ -74,6 +74,12 @@ database, and it fails if the database is in use or has an uncommitted
 write-ahead log. The conversion is one-way: a converted database cannot be
 opened by Liwan releases that bundle DuckDB 1.x.
 
+On a database with 7.1 million events spanning a year, converting an old-format
+copy left the file at about the same size (337.5 MiB became 338.0 MiB) and
+report times unchanged beyond normal run-to-run variation. The command reads
+every row of the converted database back before it replaces the original, and
+prints both file sizes.
+
 ## License
 
 Unless otherwise noted, this repository is licensed under the [Apache License, Version 2.0](LICENSE.md).

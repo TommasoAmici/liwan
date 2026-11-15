@@ -83,7 +83,7 @@ DuckDB recommends for production.
       end-to-end test. Measure the added time on the ten-million-event file and
       record it; this is a manual command, not a startup check.
 
-- [ ] Document the measured conversion and the verification. If item 1 found a
+- [x] Document the measured conversion and the verification. If item 1 found a
       real size or speed effect, add one paragraph to `## Upgrading` in
       `README.md` after the existing text, in operator language, with the
       measured numbers and the event count they came from, for example "On a
@@ -380,6 +380,13 @@ of failing a conversion that succeeded.
 Cost on the ten-million-event seed: 99.13 s for the command, about 2.0 s of
 `COPY FROM DATABASE` and the rest the read-back. That is the accepted price of
 proving the copy; nothing here runs at startup or per report.
+
+**Documentation (slice 3).** The measurement is flat, so `README.md` says the
+conversion left the file at about the same size and report times unchanged,
+with both sizes and the 7.1-million-event count, and then describes the
+read-back and the printed sizes. `CHANGELOG.md` gets one new `### Other` bullet;
+the existing Features bullet already describes the command. No config key, API
+or wire change, so nothing else moves.
 
 **Landmarks.**
 

@@ -43,6 +43,8 @@ Since this is not a library, this changelog focuses on the changes that are rele
 
 - Liwan now bundles DuckDB 2.0. Databases created by earlier versions keep
   working without changes.
+- `upgrade-duckdb` now reads the converted database back before replacing the
+  original and reports how the file size changed.
 
 ## [v1.8.1] - 2026-10-23
 
