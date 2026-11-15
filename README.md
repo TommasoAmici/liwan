@@ -43,6 +43,31 @@ Add a small browser script with one line of HTML, or send events entirely from y
 **Single sign-on**\
 Set up teams and manage accounts with Google Workspaces, Microsoft Entra, or your own OpenID Connect provider like Keycloak or Dex.
 
+## Upgrading
+
+Liwan stores events in DuckDB 2.0. Databases created by earlier versions keep
+working without changes; they are only rewritten into the new storage format
+when you ask for it.
+
+To rewrite one, stop Liwan and run:
+
+```sh
+liwan --config /path/to/liwan.config.toml upgrade-duckdb
+```
+
+Pass a database path instead to upgrade a file elsewhere:
+
+```sh
+liwan upgrade-duckdb /path/to/liwan-events.duckdb
+```
+
+The command writes the converted database next to the original, checks it, and
+keeps the original beside it with an `.old` suffix (`liwan-events.duckdb.old`
+for the default database). It needs free disk space for a second copy of the
+database, and it fails if the database is in use or has an uncommitted
+write-ahead log. The conversion is one-way: a converted database cannot be
+opened by Liwan releases that bundle DuckDB 1.x.
+
 ## License
 
 Unless otherwise noted, this repository is licensed under the [Apache License, Version 2.0](LICENSE.md).
