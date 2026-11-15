@@ -1,12 +1,13 @@
 use crate::app::DuckDBConn;
-use crate::app::models::{DisplayOverride, ProjectDisplaySettings, User};
+use crate::app::models::{DisplayOverride, Funnel, FunnelStep, ProjectDisplaySettings, User};
 use crate::app::reports::{self, DateRange, Dimension, DimensionFilter, GraphInterval, Metric, ReportStats};
+use crate::app::validate_funnel;
 use crate::utils::validate::can_view_project;
 use crate::web::RouterState;
-use crate::web::session::MaybeAuth;
-use crate::web::webext::{ApiResult, AxumErrExt, http_bail};
+use crate::web::session::{Admin, MaybeAuth};
+use crate::web::webext::{ApiResult, AxumErrExt, empty_response, http_bail};
 
-use aide::axum::{ApiRouter, routing::*};
+use aide::axum::{ApiRouter, IntoApiResponse, routing::*};
 use axum::Json;
 use axum::extract::{Path, State};
 use chrono::{DateTime, Utc};
@@ -86,6 +87,11 @@ pub fn router() -> ApiRouter<RouterState> {
         .api_route("/project/{project_id}/stats", post(project_stats_handler))
         .api_route("/project/{project_id}/dimension", post(project_detailed_handler))
         .api_route("/project/{project_id}/custom-events", post(project_custom_events_handler))
+        .api_route("/project/{project_id}/funnels", get(project_funnels_handler))
+        .api_route("/project/{project_id}/funnels", post(funnel_create_handler))
+        .api_route("/project/{project_id}/funnels/{funnel_id}", put(funnel_update_handler))
+        .api_route("/project/{project_id}/funnels/{funnel_id}", delete(funnel_delete_handler))
+        .api_route("/project/{project_id}/funnels/{funnel_id}/report", post(project_funnel_report_handler))
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
@@ -146,6 +152,179 @@ async fn project_custom_events_handler(
         run_report(&app, move |conn| reports::custom_events_report(conn, &entities, &req.ranges, &req.filters, limit))
             .await?;
     Ok(Json(CustomEventsResponse { reports }))
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "camelCase")]
+struct FunnelResponse {
+    id: String,
+    display_name: String,
+    steps: Vec<FunnelStep>,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct FunnelsResponse {
+    funnels: Vec<FunnelResponse>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "camelCase")]
+struct CreateFunnelRequest {
+    display_name: String,
+    steps: Vec<FunnelStep>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "camelCase")]
+struct UpdateFunnelRequest {
+    display_name: String,
+    steps: Vec<FunnelStep>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "camelCase")]
+struct FunnelReportRequest {
+    /// Date ranges to report, in response order. Limits apply to each range.
+    #[schemars(length(min = 1, max = 4))]
+    ranges: Vec<DateRange>,
+    filters: Vec<DimensionFilter>,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct FunnelReportResponse {
+    /// Reports in the same order as the requested ranges.
+    reports: Vec<reports::FunnelReport>,
+}
+
+impl From<&Funnel> for FunnelResponse {
+    fn from(funnel: &Funnel) -> Self {
+        Self { id: funnel.id.clone(), display_name: funnel.display_name.clone(), steps: funnel.steps.clone() }
+    }
+}
+
+fn saved_funnel(funnel: Funnel) -> Json<FunnelResponse> {
+    Json(FunnelResponse::from(&funnel))
+}
+
+/// Return the project's display settings, or 404 when the project does not exist.
+async fn funnel_display(app: &RouterState, project_id: String) -> ApiResult<ProjectDisplaySettings> {
+    let app = app.app.clone();
+    spawn_blocking(move || {
+        let project = app.projects.get(&project_id).http_status(StatusCode::NOT_FOUND)?;
+        app.project_settings.get(&project.id).http_status(StatusCode::INTERNAL_SERVER_ERROR)
+    })
+    .await
+    .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+}
+
+/// Refuse to save an event step while an administrator has hidden custom events.
+fn reject_hidden_event_steps(steps: &[FunnelStep], display: &ProjectDisplaySettings) -> ApiResult<()> {
+    if display.custom_events_display() == DisplayOverride::Hide
+        && steps.iter().any(|step| matches!(step, FunnelStep::Event { .. }))
+    {
+        http_bail!(StatusCode::BAD_REQUEST, "Custom events are hidden for this project")
+    }
+    Ok(())
+}
+
+async fn project_funnels_handler(
+    app: State<RouterState>,
+    Path(project_id): Path<String>,
+    MaybeAuth(user): MaybeAuth,
+) -> ApiResult<Json<FunnelsResponse>> {
+    report_project(&app, project_id.clone(), user).await?;
+    let app = app.app.clone();
+    let funnels = spawn_blocking(move || app.funnels.list(&project_id))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_err("Failed to list funnels", StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(FunnelsResponse { funnels: funnels.iter().map(FunnelResponse::from).collect() }))
+}
+
+async fn funnel_create_handler(
+    app: State<RouterState>,
+    Path(project_id): Path<String>,
+    Admin(_): Admin,
+    Json(request): Json<CreateFunnelRequest>,
+) -> ApiResult<Json<FunnelResponse>> {
+    let (display_name, steps) =
+        validate_funnel(&request.display_name, &request.steps).http_status(StatusCode::BAD_REQUEST)?;
+    let display = funnel_display(&app, project_id.clone()).await?;
+    reject_hidden_event_steps(&steps, &display)?;
+    let app = app.app.clone();
+    let funnel = spawn_blocking(move || app.funnels.create(&project_id, &display_name, &steps))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_err("Failed to create funnel", StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(saved_funnel(funnel))
+}
+
+async fn funnel_update_handler(
+    app: State<RouterState>,
+    Path((project_id, funnel_id)): Path<(String, String)>,
+    Admin(_): Admin,
+    Json(request): Json<UpdateFunnelRequest>,
+) -> ApiResult<impl IntoApiResponse> {
+    let (display_name, steps) =
+        validate_funnel(&request.display_name, &request.steps).http_status(StatusCode::BAD_REQUEST)?;
+    let display = funnel_display(&app, project_id.clone()).await?;
+    reject_hidden_event_steps(&steps, &display)?;
+    let app = app.app.clone();
+    let updated = spawn_blocking(move || app.funnels.update(&project_id, &funnel_id, &display_name, &steps))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_err("Failed to update funnel", StatusCode::INTERNAL_SERVER_ERROR)?;
+    if !updated {
+        http_bail!(StatusCode::NOT_FOUND, "Funnel not found")
+    }
+    Ok(empty_response())
+}
+
+async fn funnel_delete_handler(
+    app: State<RouterState>,
+    Path((project_id, funnel_id)): Path<(String, String)>,
+    Admin(_): Admin,
+) -> ApiResult<impl IntoApiResponse> {
+    let app = app.app.clone();
+    let deleted = spawn_blocking(move || app.funnels.delete(&project_id, &funnel_id))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_err("Failed to delete funnel", StatusCode::INTERNAL_SERVER_ERROR)?;
+    if !deleted {
+        http_bail!(StatusCode::NOT_FOUND, "Funnel not found")
+    }
+    Ok(empty_response())
+}
+
+async fn project_funnel_report_handler(
+    app: State<RouterState>,
+    Path((project_id, funnel_id)): Path<(String, String)>,
+    MaybeAuth(user): MaybeAuth,
+    Json(req): Json<FunnelReportRequest>,
+) -> ApiResult<Json<FunnelReportResponse>> {
+    let (entities, display) = report_project(&app, project_id.clone(), user).await?;
+    let app_handle = app.app.clone();
+    let funnel = spawn_blocking(move || app_handle.funnels.get(&project_id, &funnel_id))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_err("Failed to load funnel", StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    validate_ranges(&app, &req.ranges, &req.filters)?;
+    if req.filters.iter().any(DimensionFilter::is_session_page_filter) {
+        http_bail!(StatusCode::BAD_REQUEST, "Entry and exit page filters are not supported for funnels")
+    }
+    if display.custom_events_display() == DisplayOverride::Hide
+        && funnel.steps.iter().any(|step| matches!(step, FunnelStep::Event { .. }))
+    {
+        http_bail!(StatusCode::BAD_REQUEST, "Custom events are hidden for this project")
+    }
+    let steps = funnel.steps;
+    let reports =
+        run_report(&app, move |conn| reports::funnel_report(conn, &entities, &steps, &req.ranges, &req.filters))
+            .await?;
+    Ok(Json(FunnelReportResponse { reports }))
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]

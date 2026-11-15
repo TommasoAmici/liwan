@@ -1,10 +1,11 @@
 use anyhow::Result;
 use chrono::{Duration, Utc};
 use liwan::app::models::{
-    AccessPermission, DataRetention, Entity, EntityCollectionSettings, Event, GeoDetail, Project, ProjectVisibility,
-    UserRole,
+    AccessPermission, DataRetention, DisplayOverride, Entity, EntityCollectionSettings, Event, GeoDetail, Project,
+    ProjectDisplaySettings, ProjectVisibility, UserRole,
 };
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
 mod common;
@@ -470,4 +471,228 @@ fn prune_stats<'a>(body: &'a Value, entity_id: &str) -> &'a Value {
         .as_array()
         .and_then(|entities| entities.iter().find(|entity| entity["entityId"] == entity_id))
         .expect("entity pruning stats")
+}
+
+fn funnel_setup() -> Result<(std::sync::Arc<liwan::app::Liwan>, common::TestClient)> {
+    let app = common::app();
+    let (queues, _receivers) = common::events();
+    let client = common::TestClient::new(app.clone(), queues);
+    app.users.create("admin", "testtest", UserRole::Admin)?;
+    app.users.create("viewer", "testtest", UserRole::User)?;
+    app.entities.create(&Entity { id: "entity".into(), display_name: "Entity".into() }, &[])?;
+    for (id, visibility) in [("public", ProjectVisibility::Public), ("private", ProjectVisibility::Private)] {
+        app.projects.create(
+            &Project { id: id.into(), display_name: id.into(), visibility, secret: None },
+            &["entity".into()],
+        )?;
+    }
+    Ok((app, client))
+}
+
+async fn headers_for(client: &common::TestClient, username: &str) -> Vec<(String, String)> {
+    let cookies = common::login(client, username, "testtest").await;
+    vec![("cookie".into(), common::cookie_header(&cookies))]
+}
+
+fn funnel_body() -> Value {
+    json!({
+        "displayName": "Signup funnel",
+        "steps": [
+            { "type": "page", "path": "/pricing", "matchType": "equal" },
+            { "type": "event", "name": "signup" },
+        ],
+    })
+}
+
+fn page_funnel_body() -> Value {
+    json!({
+        "displayName": "Browse funnel",
+        "steps": [
+            { "type": "page", "path": "/pricing", "matchType": "contains" },
+            { "type": "page", "path": "/signup", "matchType": "starts_with" },
+        ],
+    })
+}
+
+fn report_body() -> Value {
+    json!({ "ranges": [{ "start": "2026-01-01T00:00:00Z", "end": "2026-01-02T00:00:00Z" }], "filters": [] })
+}
+
+fn hide_custom_events(app: &liwan::app::Liwan) -> Result<()> {
+    app.project_settings.update(&ProjectDisplaySettings {
+        project_id: "public".into(),
+        metric_display_overrides: BTreeMap::from([("custom_events".into(), DisplayOverride::Hide)]),
+        ..Default::default()
+    })?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn admins_can_manage_funnels() -> Result<()> {
+    let (_app, client) = funnel_setup()?;
+    let headers = headers_for(&client, "admin").await;
+    let created: Value =
+        client.post_with_headers("/api/dashboard/project/public/funnels", funnel_body(), headers.clone()).await.json();
+    assert_eq!(created["displayName"], "Signup funnel");
+    assert_eq!(created["steps"][0], json!({ "type": "page", "path": "/pricing", "matchType": "equal" }));
+    assert_eq!(created["steps"][1], json!({ "type": "event", "name": "signup" }));
+    assert!(created["projectId"].is_null());
+    let id = created["id"].as_str().unwrap().to_string();
+    assert_eq!(id.len(), 16);
+
+    let listed: Value = client.get_with_headers("/api/dashboard/project/public/funnels", headers.clone()).await.json();
+    assert_eq!(listed["funnels"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["funnels"][0]["id"], id.as_str());
+    assert_eq!(listed["funnels"][0]["steps"][1]["name"], "signup");
+
+    client
+        .put_with_headers(
+            &format!("/api/dashboard/project/public/funnels/{id}"),
+            json!({
+                "displayName": "Checkout funnel",
+                "steps": [
+                    { "type": "page", "path": "/cart" },
+                    { "type": "event", "name": "purchase" },
+                ],
+            }),
+            headers.clone(),
+        )
+        .await
+        .assert_status_success();
+    let listed: Value = client.get_with_headers("/api/dashboard/project/public/funnels", headers.clone()).await.json();
+    assert_eq!(listed["funnels"][0]["displayName"], "Checkout funnel");
+    assert_eq!(listed["funnels"][0]["steps"][0], json!({ "type": "page", "path": "/cart", "matchType": "equal" }));
+
+    client
+        .delete_with_headers(&format!("/api/dashboard/project/public/funnels/{id}"), headers.clone())
+        .await
+        .assert_status_success();
+    let listed: Value = client.get_with_headers("/api/dashboard/project/public/funnels", headers).await.json();
+    assert!(listed["funnels"].as_array().unwrap().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn funnel_access_follows_project_visibility() -> Result<()> {
+    let (_app, client) = funnel_setup()?;
+    let admin = headers_for(&client, "admin").await;
+    let created: Value =
+        client.post_with_headers("/api/dashboard/project/public/funnels", funnel_body(), admin).await.json();
+    let id = created["id"].as_str().unwrap().to_string();
+    let viewer = headers_for(&client, "viewer").await;
+
+    client.get_with_headers("/api/dashboard/project/public/funnels", viewer.clone()).await.assert_status_success();
+    client
+        .post_with_headers(&format!("/api/dashboard/project/public/funnels/{id}/report"), report_body(), viewer.clone())
+        .await
+        .assert_status_success();
+    for (method, path) in [
+        ("post", "/api/dashboard/project/public/funnels".to_string()),
+        ("put", format!("/api/dashboard/project/public/funnels/{id}")),
+        ("delete", format!("/api/dashboard/project/public/funnels/{id}")),
+    ] {
+        let response = match method {
+            "post" => client.post_with_headers(&path, funnel_body(), viewer.clone()).await,
+            "put" => client.put_with_headers(&path, funnel_body(), viewer.clone()).await,
+            _ => client.delete_with_headers(&path, viewer.clone()).await,
+        };
+        response.assert_status(http::StatusCode::FORBIDDEN);
+    }
+    // Without a session the mutations are unauthorized, not forbidden.
+    client.post("/api/dashboard/project/public/funnels", funnel_body()).await.assert_status_unauthorized();
+
+    // Anonymous callers can read a public project but not a private one.
+    let listed: Value = client.get("/api/dashboard/project/public/funnels").await.json();
+    assert_eq!(listed["funnels"].as_array().unwrap().len(), 1);
+    client
+        .post(&format!("/api/dashboard/project/public/funnels/{id}/report"), report_body())
+        .await
+        .assert_status_success();
+    client.get("/api/dashboard/project/private/funnels").await.assert_status_not_found();
+
+    // A signed-in viewer without project access cannot list it either.
+    client.get_with_headers("/api/dashboard/project/private/funnels", viewer).await.assert_status_not_found();
+    Ok(())
+}
+
+#[tokio::test]
+async fn invalid_funnels_are_rejected() -> Result<()> {
+    let (_app, client) = funnel_setup()?;
+    let headers = headers_for(&client, "admin").await;
+    let eleven_steps =
+        (0..11).map(|index| json!({ "type": "page", "path": format!("/step{index}") })).collect::<Vec<_>>();
+    for body in [
+        json!({ "displayName": "One step", "steps": [{ "type": "page", "path": "/a" }] }),
+        json!({ "displayName": "Too many steps", "steps": eleven_steps }),
+        json!({ "displayName": "   ", "steps": [{ "type": "page", "path": "/a" }, { "type": "page", "path": "/b" }] }),
+        json!({ "displayName": "Blank path", "steps": [
+            { "type": "page", "path": "/a" }, { "type": "page", "path": "  " }
+        ] }),
+        json!({ "displayName": "Pageview event", "steps": [
+            { "type": "page", "path": "/a" }, { "type": "event", "name": "pageview" }
+        ] }),
+    ] {
+        client
+            .post_with_headers("/api/dashboard/project/public/funnels", body, headers.clone())
+            .await
+            .assert_status_bad_request();
+    }
+    let listed: Value = client.get_with_headers("/api/dashboard/project/public/funnels", headers).await.json();
+    assert!(listed["funnels"].as_array().unwrap().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn hidden_custom_events_block_event_steps_only() -> Result<()> {
+    let (app, client) = funnel_setup()?;
+    let headers = headers_for(&client, "admin").await;
+    // Auto mode (no custom events recorded yet) accepts an event step.
+    let created: Value =
+        client.post_with_headers("/api/dashboard/project/public/funnels", funnel_body(), headers.clone()).await.json();
+    let id = created["id"].as_str().unwrap().to_string();
+
+    hide_custom_events(&app)?;
+
+    client
+        .post_with_headers("/api/dashboard/project/public/funnels", funnel_body(), headers.clone())
+        .await
+        .assert_status_bad_request();
+    client
+        .post_with_headers("/api/dashboard/project/public/funnels", page_funnel_body(), headers.clone())
+        .await
+        .assert_status_success();
+    client
+        .put_with_headers(&format!("/api/dashboard/project/public/funnels/{id}"), funnel_body(), headers.clone())
+        .await
+        .assert_status_bad_request();
+    client
+        .put_with_headers(&format!("/api/dashboard/project/public/funnels/{id}"), page_funnel_body(), headers.clone())
+        .await
+        .assert_status_success();
+    Ok(())
+}
+
+#[tokio::test]
+async fn funnels_belong_to_one_project() -> Result<()> {
+    let (app, client) = funnel_setup()?;
+    let headers = headers_for(&client, "admin").await;
+    let created: Value =
+        client.post_with_headers("/api/dashboard/project/public/funnels", funnel_body(), headers.clone()).await.json();
+    let id = created["id"].as_str().unwrap().to_string();
+
+    client
+        .put_with_headers(&format!("/api/dashboard/project/private/funnels/{id}"), funnel_body(), headers.clone())
+        .await
+        .assert_status_not_found();
+    client
+        .delete_with_headers(&format!("/api/dashboard/project/private/funnels/{id}"), headers.clone())
+        .await
+        .assert_status_not_found();
+
+    let listed: Value = client.get_with_headers("/api/dashboard/project/public/funnels", headers).await.json();
+    assert_eq!(listed["funnels"].as_array().unwrap().len(), 1);
+
+    app.projects.delete("public")?;
+    assert!(app.funnels.list("public")?.is_empty());
+    Ok(())
 }
