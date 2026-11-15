@@ -143,7 +143,7 @@ those costs without changing stored events, report results, or any wire format.
       `resolved_for_entity`'s clones in this slice; they are below the
       measurement noise (see out of scope).
 
-- [ ] Render dashboard HTML once per file in `crates/liwan/src/web/webext.rs`.
+- [x] Render dashboard HTML once per file in `crates/liwan/src/web/webext.rs`.
       `serve` currently rebuilds the whole document on every navigation: config
       placeholder, up to five `str::replace` passes for the base path, custom
       head and footer, then a blake3 hash, and only then compares
@@ -374,6 +374,17 @@ dominates). The hash input is byte-identical: `format_ip_matches_display_for_bot
 `visitor_group_ids_hash_the_display_form_of_the_ip`, and
 `masked_visitor_group_ids_hash_the_masked_address` pin it, so visitor groups do
 not split on deploy.
+
+**Slice 8 notes: rendered HTML.** `serve` now caches each page's rendered body
+and ETag behind `RENDERED_HTML`, keyed by the page path plus a blake3
+fingerprint of the rendering inputs (config JSON, head HTML, footer links). The
+config part of the key exists because two apps in one process (the integration
+tests) otherwise serve each other's rendering. An in-process release
+measurement: 22.1 µs to render from scratch, 381 ns for a cache hit, so about
+22 µs saved per navigation; the page is small enough that a `strobe` page-load
+profile cannot resolve that against noise, so the number above replaces the
+profile the plan asked for. `tests/serve.rs` covers body/ETag stability, `304`,
+and a base-path render. No non-HTML file changed.
 
 **Decisions (2026-11-15, user answers).**
 

@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::fmt::Display;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, LazyLock, RwLock};
 
 use crate::config::{Config, FooterLink};
 use crate::utils::geoip_headers::parse_geoip_headers;
@@ -185,34 +187,13 @@ pub(super) async fn serve(
     let mime = content.metadata.mimetype();
     let is_html = mime == "text/html";
 
-    let (body, hash) = if is_html {
-        let html = std::str::from_utf8(&content.data).map_err(|err| {
-            tracing::error!("failed to read embedded HTML as UTF-8: {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-        let config =
-            HtmlConfig { base_url: state.config.base_url.clone(), disable_favicons: state.config.disable_favicons };
-        let config_json = serde_json::to_string(&config).map_err(|err| {
-            tracing::error!("failed to serialize HTML config: {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-        let base_path = state.config.base_path();
-        let body = html.replace(CONFIG_PLACEHOLDER, &config_json.replace('<', "\\u003c"));
-        let body = if base_path.is_empty() {
-            body
-        } else {
-            body.replace("href=\"/", &format!("href=\"{base_path}/"))
-                .replace("src=\"/", &format!("src=\"{base_path}/"))
-                .replace("=\"/_assets/", &format!("=\"{base_path}/_assets/"))
-                .replace("url=/", &format!("url={base_path}/"))
-                .replace("url(\"/_assets/", &format!("url(\"{base_path}/_assets/"))
-        };
-        let body = inject_custom_html(body, &state.config);
-        let hash = blake3::hash(body.as_bytes()).to_hex().to_string();
-        (Body::from(body), hash)
-    } else {
-        let hash = crate::utils::encode_hex(&content.metadata.sha256_hash());
-        (Body::from(content.data), hash)
+    // The dashboard's config is fixed at startup, so a rendered HTML page and
+    // its ETag never change during a run. Cache them per page path instead of
+    // re-rendering and re-hashing the whole document on every navigation.
+    let rendered = if is_html { Some(rendered_html(&path, &content, &state.config)?) } else { None };
+    let hash = match &rendered {
+        Some(entry) => entry.1.clone(),
+        None => crate::utils::encode_hex(&content.metadata.sha256_hash()),
     };
 
     let etag = format!("\"{hash}\"");
@@ -225,11 +206,77 @@ pub(super) async fn serve(
         return Ok(builder.status(StatusCode::NOT_MODIFIED).body(Body::empty()).unwrap());
     }
 
+    let body = match rendered {
+        Some(entry) => Body::from(entry.0.clone()),
+        None => Body::from(content.data),
+    };
+
     Ok(builder.body(body).unwrap())
 }
 
-fn inject_custom_html(html: String, config: &Config) -> String {
-    let links = config
+type RenderedPage = Arc<(Vec<u8>, String)>;
+
+static RENDERED_HTML: LazyLock<RwLock<HashMap<String, RenderedPage>>> = LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// Render an embedded HTML page once per path and config and remember its body
+/// and ETag. The config is part of the key so two apps in one process (tests)
+/// cannot serve each other's rendering.
+fn rendered_html(path: &str, content: &rust_embed::EmbeddedFile, config: &Config) -> Result<RenderedPage, StatusCode> {
+    let key = render_key(path, config)?;
+    if let Some(entry) = RENDERED_HTML.read().expect("rendered html cache poisoned").get(&key) {
+        return Ok(entry.clone());
+    }
+
+    let entry = Arc::new(render_html(content, config)?);
+    RENDERED_HTML.write().expect("rendered html cache poisoned").insert(key, entry.clone());
+    Ok(entry)
+}
+
+fn render_key(path: &str, config: &Config) -> Result<String, StatusCode> {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(path.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(html_config_json(config)?.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(config.head_html.join("\n").as_bytes());
+    hasher.update(b"\0");
+    hasher.update(footer_links_html(config).as_bytes());
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn html_config_json(config: &Config) -> Result<String, StatusCode> {
+    let html_config = HtmlConfig { base_url: config.base_url.clone(), disable_favicons: config.disable_favicons };
+    serde_json::to_string(&html_config).map_err(|err| {
+        tracing::error!("failed to serialize HTML config: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+fn render_html(content: &rust_embed::EmbeddedFile, config: &Config) -> Result<(Vec<u8>, String), StatusCode> {
+    let html = std::str::from_utf8(&content.data).map_err(|err| {
+        tracing::error!("failed to read embedded HTML as UTF-8: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let config_json = html_config_json(config)?;
+
+    let base_path = config.base_path();
+    let body = html.replace(CONFIG_PLACEHOLDER, &config_json.replace('<', "\\u003c"));
+    let body = if base_path.is_empty() {
+        body
+    } else {
+        body.replace("href=\"/", &format!("href=\"{base_path}/"))
+            .replace("src=\"/", &format!("src=\"{base_path}/"))
+            .replace("=\"/_assets/", &format!("=\"{base_path}/_assets/"))
+            .replace("url=/", &format!("url={base_path}/"))
+            .replace("url(\"/_assets/", &format!("url(\"{base_path}/_assets/"))
+    };
+    let body = inject_custom_html(body, config);
+    let hash = blake3::hash(body.as_bytes()).to_hex().to_string();
+    Ok((body.into_bytes(), hash))
+}
+
+fn footer_links_html(config: &Config) -> String {
+    config
         .footer_links
         .iter()
         .map(|link| match link {
@@ -237,9 +284,12 @@ fn inject_custom_html(html: String, config: &Config) -> String {
             FooterLink::Link { label, url } => format!("<a href=\"{url}\">{label}</a>"),
         })
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("\n")
+}
 
-    html.replace(FOOTER_LINKS_PLACEHOLDER, &links).replace(HEAD_HTML_PLACEHOLDER, &config.head_html.join("\n"))
+fn inject_custom_html(html: String, config: &Config) -> String {
+    html.replace(FOOTER_LINKS_PLACEHOLDER, &footer_links_html(config))
+        .replace(HEAD_HTML_PLACEHOLDER, &config.head_html.join("\n"))
 }
 
 pub(crate) fn empty_response() -> impl IntoApiResponse {
