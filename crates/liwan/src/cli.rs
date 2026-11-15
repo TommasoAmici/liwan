@@ -278,6 +278,36 @@ fn upgrade_db(path: &std::path::Path) -> Result<std::path::PathBuf> {
             .context("Failed to create upgraded DuckDB database")?;
         conn.execute_batch("COPY FROM DATABASE liwan_source TO liwan_upgraded; CHECKPOINT liwan_upgraded")
             .with_context(|| format!("Failed to copy database; {} may contain a partial copy", upgraded.display()))?;
+
+        let storage_version: String = conn
+            .query_row(
+                "SELECT tags['storage_version'] FROM duckdb_databases() WHERE database_name = 'liwan_upgraded'",
+                [],
+                |row| row.get(0),
+            )
+            .with_context(|| format!("Failed to read the storage version of {}", upgraded.display()))?;
+        if !storage_version.starts_with("v2.") {
+            bail!(
+                "The copy in {} uses storage version {storage_version}, not v2; the original was not changed",
+                upgraded.display()
+            );
+        }
+
+        let table_names = |database_name: &str| -> Result<Vec<String>> {
+            let mut stmt =
+                conn.prepare("SELECT table_name FROM duckdb_tables() WHERE database_name = ? ORDER BY table_name")?;
+            let rows = stmt.query_map([database_name], |row| row.get::<_, String>(0))?;
+            Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+        };
+        let source_tables = table_names("liwan_source")?;
+        let upgraded_tables = table_names("liwan_upgraded")?;
+        if source_tables != upgraded_tables {
+            bail!(
+                "The copy in {} has tables {upgraded_tables:?} but the original has {source_tables:?}; \
+                 the original was not changed",
+                upgraded.display()
+            );
+        }
     }
 
     std::fs::rename(path, &backup).context("Failed to save original database as .old")?;
@@ -329,6 +359,7 @@ mod tests {
             conn.execute_batch(
                 "CREATE TABLE events (id INTEGER PRIMARY KEY, properties MAP(VARCHAR, VARCHAR));
                  INSERT INTO events VALUES (42, MAP(['plan'], ['pro']));
+                 CREATE TABLE migrations (version INTEGER, name VARCHAR, applied_on TIMESTAMP);
                  CHECKPOINT",
             )
             .unwrap();
@@ -356,6 +387,18 @@ mod tests {
         };
         assert_eq!(version(&original), "v1.5.0+");
         assert_eq!(version(&upgraded), "v2.0.0+");
+
+        let table_names = |conn: &Connection| -> Vec<String> {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT table_name FROM duckdb_tables()
+                     WHERE database_name NOT IN ('system', 'temp') ORDER BY table_name",
+                )
+                .unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(0)).unwrap().collect::<duckdb::Result<Vec<_>>>().unwrap()
+        };
+        assert_eq!(table_names(&original), ["events".to_string(), "migrations".to_string()]);
+        assert_eq!(table_names(&upgraded), table_names(&original));
     }
 
     #[test]
