@@ -5,7 +5,7 @@ pub mod models;
 pub use core::reports;
 pub use core::{
     ExternalAuthLogin, ExternalAuthProvider, ExternalAuthSettings, ExternalAuthStart, GroupTeamMapping,
-    LiwanExternalAuth, LiwanUtmTags, UtmTagInput, validate_utm_tag,
+    LiwanExternalAuth, LiwanFunnels, LiwanUtmTags, UtmTagInput, validate_funnel, validate_utm_tag,
 };
 use std::sync::Arc;
 
@@ -39,6 +39,7 @@ pub struct Liwan {
     pub settings: LiwanSettings,
     pub project_settings: LiwanProjectSettings,
     pub utm_tags: LiwanUtmTags,
+    pub funnels: LiwanFunnels,
 
     #[cfg(feature = "geoip")]
     pub geoip: Arc<core::LiwanGeoIP>,
@@ -101,6 +102,7 @@ impl Liwan {
             settings: LiwanSettings::try_new(conn_app.clone())?,
             project_settings: LiwanProjectSettings::new(conn_app.clone()),
             utm_tags: LiwanUtmTags::new(conn_app.clone()),
+            funnels: LiwanFunnels::new(conn_app.clone()),
             users: LiwanUsers::new(conn_app),
 
             events_pool: conn_events,

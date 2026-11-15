@@ -135,6 +135,39 @@ pub struct UtmTag {
     pub utm_term: Option<String>,
 }
 
+/// A saved funnel: ordered steps a visitor group is expected to complete.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Funnel {
+    pub id: String,
+    pub project_id: String,
+    pub display_name: String,
+    pub steps: Vec<FunnelStep>,
+}
+
+/// One step of a funnel, either a pageview or a custom event.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FunnelStep {
+    /// A pageview whose path matches `path`.
+    Page {
+        path: String,
+        #[serde(rename = "matchType", default)]
+        match_type: FunnelMatch,
+    },
+    /// A custom event with this exact name.
+    Event { name: String },
+}
+
+/// How a page step compares its path with the tracked path.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FunnelMatch {
+    #[default]
+    Equal,
+    Contains,
+    StartsWith,
+}
+
 #[derive(Debug, Clone)]
 pub struct ApiKey {
     pub id: String,
