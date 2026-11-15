@@ -5,6 +5,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 
 import type { DateRange } from "@/api/ranges";
 import { LoadingSpinner } from "@/components/ui/loading";
+import { getDashboardProjectId } from "@/config";
 import type { Dimension, DimensionFilter, DimensionTableRow, Metric, ProjectResponse } from "@/constants";
 import { dimensions, eventMetricName, metrics } from "@/constants";
 import { useDimension, useProject, useProjectGraph, useProjectStats } from "@/hooks/api";
@@ -16,6 +17,7 @@ import { SelectFilters } from "./filter";
 import { LineGraph } from "./graph";
 import { SelectMetrics } from "./metric";
 import { ProjectHeader } from "./project-header";
+import { ProjectNav } from "./project-nav";
 import { PropertiesCard } from "./properties";
 import { SelectRange } from "./range";
 import { parseReportFilters, serializeReportFilters } from "./report-filters";
@@ -62,7 +64,7 @@ export const getDimensionFilter = (dimension: Dimension, value: string, property
 
 export const Project = () => {
 	const [projectId] = useState(() =>
-		typeof window === "undefined" ? undefined : window.location.pathname.split("/").pop(),
+		typeof window === "undefined" ? undefined : getDashboardProjectId(),
 	);
 	const [filters, setFilters] = useState<DimensionFilter[]>(() =>
 		typeof window === "undefined" ? [] : parseReportFilters(window.location.search),
@@ -210,7 +212,7 @@ export const Project = () => {
 		[toggleFilter],
 	);
 
-	if (notFound) {
+	if (!projectId || notFound) {
 		return <div className={styles.notFound}>Project not found</div>;
 	}
 
@@ -241,6 +243,7 @@ export const Project = () => {
 
 	return (
 		<div className={styles.project}>
+			<ProjectNav projectId={project.id} current="overview" />
 			<div className={styles.projectReport}>
 				<div className={styles.projectHeader}>
 					<ProjectHeader project={project} stats={stats} />

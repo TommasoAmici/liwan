@@ -5,7 +5,7 @@ import { CopyIcon } from "lucide-react";
 import { runtimeConfig } from "@/config";
 import { createToast } from "./toast";
 
-const CopyButton = ({ value, label }: { value: string; label: string }) => (
+export const CopyButton = ({ value, label }: { value: string; label: string }) => (
 	<button
 		type="button"
 		className={styles.copyButton}

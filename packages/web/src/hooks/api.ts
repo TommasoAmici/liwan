@@ -18,9 +18,10 @@ const numericCollator = new Intl.Collator(undefined, { numeric: true });
 
 const getStatusCode = (error: unknown) => (error as { status?: number } | undefined)?.status;
 
-export const useMe = () => {
+export const useMe = ({ enabled = true }: { enabled?: boolean } = {}) => {
 	const { data, isLoading, error } = useQuery({
 		queryKey: ["me"],
+		enabled,
 		staleTime: 5 * 60_000,
 		refetchOnMount: false,
 		retry: false,
@@ -96,8 +97,38 @@ export const useCustomEvents = ({
 	return { data, isLoading: isFetching, error };
 };
 
-export const useEntities = () => {
+/** The saved campaign links of a project, ordered by name. */
+export const useUtmTags = (projectId?: string) => {
 	const { data, isLoading, error } = useQuery({
+		queryKey: ["utm_tags", projectId],
+		enabled: projectId !== undefined,
+		queryFn: () =>
+			api["/api/dashboard/project/{project_id}/utm-tags"]
+				.get({ params: { project_id: projectId as string } })
+				.json(),
+	});
+	return { utmTags: data?.utmTags ?? [], isLoading, error };
+};
+
+/** Pageviews and visitors per saved tag for one range, all in one request. */
+export const useUtmTagSummary = ({ projectId, range }: { projectId?: string; range: DateRange }) => {
+	const { data, isFetching, error } = useQuery({
+		queryKey: ["utm_tag_summary", projectId, range.cacheKey()],
+		enabled: projectId !== undefined,
+		refetchInterval: range.endsToday() ? 60_000 : undefined,
+		queryFn: () =>
+			api["/api/dashboard/project/{project_id}/utm-tags/summary"]
+				.post({ params: { project_id: projectId ?? "" }, json: { range: range.toAPI() } })
+				.json()
+				.then((result) => {
+					if (typeof result === "string") return Promise.reject(new Error(result));
+					return result.summaries;
+				}),
+	});
+	return { summaries: data ?? [], isLoading: isFetching, error };
+};
+
+export const useEntities = () => {	const { data, isLoading, error } = useQuery({
 		queryKey: ["entities"],
 		refetchOnMount: true,
 		retry: false,
@@ -327,3 +358,8 @@ export const invalidateEntities = () => queryClient.invalidateQueries({ queryKey
 export const invalidateUsers = () => queryClient.invalidateQueries({ queryKey: ["users"] });
 export const invalidateTeams = () => queryClient.invalidateQueries({ queryKey: ["teams"] });
 export const invalidateApiKeys = () => queryClient.invalidateQueries({ queryKey: ["api_keys"] });
+export const invalidateUtmTags = (projectId: string) =>
+	Promise.all([
+		queryClient.invalidateQueries({ queryKey: ["utm_tags", projectId] }),
+		queryClient.invalidateQueries({ queryKey: ["utm_tag_summary", projectId] }),
+	]);
