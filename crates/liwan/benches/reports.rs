@@ -1,6 +1,7 @@
 use chrono::{Days, Utc};
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use liwan::app::Liwan;
+use liwan::app::models::UtmTag;
 use liwan::app::reports::{self, DateRange, Dimension, GraphInterval, Metric};
 use liwan::config::Config;
 use std::time::Duration;
@@ -9,6 +10,48 @@ fn configure_group(group: &mut criterion::BenchmarkGroup<'_, criterion::measurem
     group.warm_up_time(Duration::from_secs(2));
     group.measurement_time(Duration::from_secs(5));
     group.sample_size(20);
+}
+
+/// Twenty tags built from the values `cargo dev seed` writes, including partial
+/// tags and two that match nothing, as a project's list would look.
+fn benchmark_utm_tags() -> Vec<UtmTag> {
+    let rows: [(&str, &str, &str, &str, &str); 20] = [
+        ("google", "cpc", "summer_sale", "banner", "liwan"),
+        ("google", "cpc", "black_friday", "sidebar", "analytics"),
+        ("bing", "organic", "christmas", "footer", "tracking"),
+        ("facebook", "referral", "new_year", "popup", "web"),
+        ("twitter", "email", "summer_sale", "banner", "liwan"),
+        ("google", "", "", "", ""),
+        ("bing", "", "", "", ""),
+        ("facebook", "", "", "", ""),
+        ("twitter", "", "", "", ""),
+        ("google", "cpc", "", "", ""),
+        ("bing", "organic", "", "", ""),
+        ("facebook", "referral", "", "", ""),
+        ("twitter", "email", "", "", ""),
+        ("", "cpc", "summer_sale", "", ""),
+        ("", "", "black_friday", "", ""),
+        ("", "", "christmas", "banner", ""),
+        ("", "", "", "sidebar", ""),
+        ("", "", "", "", "liwan"),
+        ("google", "cpc", "summer_sale", "", "shoes"),
+        ("", "", "winter_sale", "", ""),
+    ];
+    let text = |value: &str| Some(value.to_string()).filter(|value| !value.is_empty());
+    rows.iter()
+        .enumerate()
+        .map(|(index, (source, medium, campaign, content, term))| UtmTag {
+            id: format!("tag-{index:02}"),
+            project_id: "benchmark".to_string(),
+            display_name: format!("Campaign {index:02}"),
+            url: "https://example.com/landing".to_string(),
+            utm_source: text(source),
+            utm_medium: text(medium),
+            utm_campaign: text(campaign),
+            utm_content: text(content),
+            utm_term: text(term),
+        })
+        .collect()
 }
 
 fn benchmark_reports(c: &mut Criterion) {
@@ -144,6 +187,16 @@ fn benchmark_reports(c: &mut Criterion) {
             b.iter(|| {
                 reports::custom_events_report(&conn, &entities, &ranges, &[], 100).expect("custom_events_report failed")
             });
+        });
+        group.finish();
+    }
+
+    {
+        let mut group = c.benchmark_group("utm_tag_stats");
+        configure_group(&mut group);
+        let tags = benchmark_utm_tags();
+        group.bench_function("20_tags", |b| {
+            b.iter(|| reports::utm_tag_summary(&conn, &entities, &tags, &ranges[0]).expect("utm_tag_summary failed"));
         });
         group.finish();
     }
