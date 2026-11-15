@@ -28,6 +28,11 @@ Since this is not a library, this changelog focuses on the changes that are rele
   open in a Liwan release that bundles the older engine.
 - Ingesting events no longer slows down as daily traffic grows. Recorded events
   and reports are unchanged.
+- Projects have a *UTM tags* screen. Save the tagged links you use for a
+  campaign, see the pageviews and unique visitors each one brought in for the
+  selected range, and open the report filtered to that tag. Administrators add,
+  edit, and delete tags; anyone who can view the project sees them and their
+  traffic.
 
 ### Other
 

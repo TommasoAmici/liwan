@@ -37,6 +37,9 @@ No tracking cookies or cross-site tracking. Your analytics data stays on your se
 **Collect only what you need**\
 Choose what data to collect and how long to keep it. Location detail is adjustable, and campaign attribution and session metrics can be disabled independently.
 
+**Campaign links**\
+Save the UTM-tagged links you use for a campaign in a project and see the pageviews and unique visitors each one brought in for the selected range. Open the report filtered to that tag in one click.
+
 **Lightweight tracking**\
 Add a small browser script with one line of HTML, or send events entirely from your server. Use either approach with any framework or CMS.
 
