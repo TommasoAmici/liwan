@@ -194,7 +194,7 @@ those costs without changing stored events, report results, or any wire format.
       `--test dashboard` must pass; add a test for a non-admin user seeing only
       the projects their teams grant.
 
-- [ ] Clean up the report queries without changing their results:
+- [x] Clean up the report queries without changing their results:
 
       - `range_events_sql` (`crates/liwan/src/app/core/reports/shared.rs:7`)
         selects `*` from `events`. Name the columns each report reads
@@ -407,6 +407,20 @@ in memory; `LiwanEntities::projects` is still there for other callers.
 V11 is one `create index` on the small `project_entities` table: no rows are
 rewritten, and it is the next free number after V9 (funnels) and V10 (UTM
 tags).
+
+**Slice 11 notes: report cleanup.** `range_events_sql` takes the columns its
+report reads, and `report_columns` derives them from the report's base list
+plus its dimension plus every filter dimension (property filters bring
+`properties`, entry/exit filters bring the session intervals). `custom_events`
+asks for the smallest set. This does not claim a speed-up: DuckDB already
+projected through the CTE, and no `EXPLAIN ANALYZE` comparison was captured for
+this slice; the value is that a future column addition cannot silently widen
+every report scan. `online_users` is gone (its test became
+`overall_stats_counts_only_pageviews_as_current_visitors`), and a retention
+prune that deletes events drops the entity's `custom_data` entry
+(`retention_prune_invalidates_custom_data_cache`). Report results are unchanged:
+all `reports` tests and `--test dashboard` pass. `earliest_timestamp` and the
+per-range scans were left alone as the plan says.
 
 **Decisions (2026-11-15, user answers).**
 

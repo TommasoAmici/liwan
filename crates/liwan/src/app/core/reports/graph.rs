@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Datelike, Days, Duration, LocalResult, NaiveDate, Offset, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
 
-use super::shared::{build_filter_clause, metric_aggregate_sql, range_events_sql};
+use super::shared::{build_filter_clause, metric_aggregate_sql, range_events_sql, report_columns};
 use super::{DateRange, DimensionFilter, GraphInterval, Metric, ReportGraph, ReportGraphPoint};
 
 fn zero_report_graph(buckets: &[DateRange]) -> ReportGraph {
@@ -167,7 +167,20 @@ pub fn overall_report(
     }
 
     let mut params = ParamVec::new();
-    let range_events = range_events_sql(ranges, &mut params);
+    let columns = report_columns(
+        &[
+            "event",
+            "entity_id",
+            "visitor_group_id",
+            "created_at",
+            "time_from_last_event",
+            "time_to_next_event",
+            "exited_at",
+        ],
+        None,
+        filters,
+    );
+    let range_events = range_events_sql(ranges, &mut params, &columns);
 
     let (filters_sql, filters_params) = build_filter_clause(filters)?;
     // Apply the same filters, but not the minimum sample counts used by summary and dimension reports.

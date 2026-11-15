@@ -5,7 +5,9 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use duckdb::params_from_iter;
 
-use super::shared::{build_filter_clause, metric_aggregate_sql, metric_sample_count_sql, range_events_sql};
+use super::shared::{
+    build_filter_clause, metric_aggregate_sql, metric_sample_count_sql, range_events_sql, report_columns,
+};
 use super::{DateRange, DimensionFilter, Metric, ReportStats};
 
 /// Return the earliest event timestamp for the selected entities
@@ -26,28 +28,6 @@ pub fn earliest_timestamp(conn: &DuckDBConn, entities: &[String]) -> Result<Opti
     let mut stmt = conn.prepare_cached(&query)?;
     let earliest_timestamp = stmt.query_row(params_from_iter(entities), |row| row.get(0))?;
     Ok(earliest_timestamp)
-}
-
-/// Count visitor groups with pageviews in the last five minutes.
-pub fn online_users(conn: &DuckDBConn, entities: &[String]) -> Result<u64> {
-    if entities.is_empty() {
-        return Ok(0);
-    }
-
-    let vars = repeat_vars(entities.len());
-    let query = format!(
-        "--sql
-			select count(distinct e.visitor_group_id)
-			from events e
-			where
-				e.event = 'pageview' and e.entity_id in ({vars}) and
-				e.created_at >= (now()::timestamp - interval '5 minutes');
-	"
-    );
-
-    let mut stmt = conn.prepare_cached(&query)?;
-    let online_users = stmt.query_row(params_from_iter(entities), |row| row.get(0))?;
-    Ok(online_users)
 }
 
 /// Build all range summaries and the live visitor count in one query.
@@ -80,7 +60,20 @@ pub fn overall_stats(
     };
 
     let mut params = ParamVec::new();
-    let range_events = range_events_sql(ranges, &mut params);
+    let columns = report_columns(
+        &[
+            "event",
+            "entity_id",
+            "visitor_group_id",
+            "created_at",
+            "time_from_last_event",
+            "time_to_next_event",
+            "exited_at",
+        ],
+        None,
+        filters,
+    );
+    let range_events = range_events_sql(ranges, &mut params, &columns);
     let range_count = ranges.len();
     params.push(event);
     params.extend(entities);
@@ -172,7 +165,7 @@ mod tests {
     use chrono::Duration;
 
     #[test]
-    fn online_users_counts_only_pageviews() {
+    fn overall_stats_counts_only_pageviews_as_current_visitors() {
         let app = Liwan::new_memory(Config::default()).unwrap();
         let conn = app.events_conn().unwrap();
         for (visitor, event) in [("visitor-1", "pageview"), ("visitor-2", "signup")] {
@@ -183,7 +176,6 @@ mod tests {
             .unwrap();
         }
 
-        assert_eq!(online_users(&conn, &["entity-1".into()]).unwrap(), 1);
         let now = Utc::now();
         let ranges = [DateRange { start: now - Duration::days(2), end: now - Duration::days(1) }];
         let (stats, current_visitors) =

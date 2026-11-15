@@ -4,7 +4,18 @@ use anyhow::{Result, bail};
 use super::{DateRange, Dimension, DimensionFilter, FilterType, Metric};
 
 /// Scan each requested range separately so DuckDB can prune the history between ranges.
-pub(super) fn range_events_sql(ranges: &[DateRange], params: &mut ParamVec<'_>) -> String {
+///
+/// `columns` is the set of event columns every report in the query reads; the
+/// projection is explicit so a report never depends on DuckDB pruning `*`.
+pub(super) fn range_events_sql(ranges: &[DateRange], params: &mut ParamVec<'_>, columns: &[&str]) -> String {
+    let mut selected: Vec<&str> = Vec::new();
+    for column in columns {
+        if !selected.contains(column) {
+            selected.push(column);
+        }
+    }
+    let projection = selected.join(", ");
+
     ranges
         .iter()
         .enumerate()
@@ -12,12 +23,51 @@ pub(super) fn range_events_sql(ranges: &[DateRange], params: &mut ParamVec<'_>) 
             params.push(range.start);
             params.push(range.end);
             format!(
-                "select {index} as range_idx, * from events
+                "select {index} as range_idx, {projection} from events
                  where created_at >= ?::timestamp and created_at < ?::timestamp"
             )
         })
         .collect::<Vec<_>>()
         .join(" union all ")
+}
+
+/// The event columns a report reads, including the ones its filters and
+/// dimension reference. Duplicates are removed by [`range_events_sql`].
+pub(super) fn report_columns(
+    base: &[&'static str],
+    dimension: Option<Dimension>,
+    filters: &[DimensionFilter],
+) -> Vec<&'static str> {
+    let mut columns = base.to_vec();
+    if let Some(dimension) = dimension {
+        columns.extend(dimension_columns(dimension));
+    }
+    for filter in filters {
+        columns.extend(dimension_columns(filter.dimension));
+    }
+    columns
+}
+
+fn dimension_columns(dimension: Dimension) -> &'static [&'static str] {
+    match dimension {
+        Dimension::Url => &["fqdn", "path"],
+        Dimension::UrlEntry | Dimension::UrlExit => &["fqdn", "path", "time_from_last_event", "time_to_next_event"],
+        Dimension::Path => &["path"],
+        Dimension::Fqdn => &["fqdn"],
+        Dimension::Referrer => &["referrer"],
+        Dimension::Platform => &["platform"],
+        Dimension::Browser => &["browser"],
+        Dimension::Mobile => &["mobile"],
+        Dimension::Country | Dimension::City => &["country", "city"],
+        Dimension::UtmSource => &["utm_source"],
+        Dimension::UtmMedium => &["utm_medium"],
+        Dimension::UtmCampaign => &["utm_campaign"],
+        Dimension::UtmContent => &["utm_content"],
+        Dimension::UtmTerm => &["utm_term"],
+        Dimension::ScreenWidth => &["screen_width"],
+        Dimension::Orientation => &["orientation"],
+        Dimension::Property => &["properties"],
+    }
 }
 
 pub(super) const SESSION_DURATION_SQL: &str = "interval '30 minutes'";

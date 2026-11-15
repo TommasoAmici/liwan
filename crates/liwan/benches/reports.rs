@@ -43,9 +43,6 @@ fn benchmark_reports(c: &mut Criterion) {
         group.bench_function("earliest_timestamp", |b| {
             b.iter(|| reports::earliest_timestamp(&conn, &entities).expect("earliest_timestamp failed"));
         });
-        group.bench_function("online_users", |b| {
-            b.iter(|| reports::online_users(&conn, &entities).expect("online_users failed"));
-        });
         group.finish();
     }
 

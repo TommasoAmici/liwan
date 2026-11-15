@@ -7,6 +7,7 @@ use duckdb::params_from_iter;
 
 use super::shared::{
     SESSION_DURATION_SQL, build_filter_clause, metric_aggregate_sql, metric_sample_count_sql, range_events_sql,
+    report_columns,
 };
 use super::{DateRange, Dimension, DimensionFilter, Metric, ReportTable};
 
@@ -29,7 +30,20 @@ pub fn dimension_report(
     }
 
     let mut params = ParamVec::new();
-    let range_events = range_events_sql(ranges, &mut params);
+    let columns = report_columns(
+        &[
+            "event",
+            "entity_id",
+            "visitor_group_id",
+            "created_at",
+            "time_from_last_event",
+            "time_to_next_event",
+            "exited_at",
+        ],
+        Some(*dimension),
+        filters,
+    );
+    let range_events = range_events_sql(ranges, &mut params, &columns);
     let range_count = ranges.len();
     let entity_vars = repeat_vars(entities.len());
     let (filters_sql, filters_params) = build_filter_clause(filters)?;

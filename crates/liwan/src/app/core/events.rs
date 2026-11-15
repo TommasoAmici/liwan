@@ -341,6 +341,12 @@ impl LiwanEvents {
             }
         }
 
+        // A retention run can remove the only custom event or property of an
+        // entity; drop the cached answer so the dashboard re-queries.
+        if !dry_run && stats.deleted_events > 0 {
+            self.custom_data.lock().expect("custom data lock").remove(entity_id);
+        }
+
         Ok(stats)
     }
 }
@@ -723,6 +729,32 @@ mod tests {
         let exited: u64 =
             conn.query_row("select count(*) from events where exited_at is not null", [], |row| row.get(0)).unwrap();
         assert_eq!(exited, 3);
+    }
+
+    #[test]
+    fn retention_prune_invalidates_custom_data_cache() {
+        use crate::app::models::{DataRetention, GeoDetail, ResolvedCollectionSettings, VisitorGroupMode};
+
+        let app = Liwan::new_memory(Config::default()).unwrap();
+        let mut old = event(Utc::now() - chrono::Duration::days(10));
+        old.event = "signup".into();
+        app.events.append(vec![old].into_iter()).unwrap();
+
+        let entities = ["entity-1".to_string()];
+        assert!(app.events.custom_data(&entities).unwrap().events);
+
+        let settings = ResolvedCollectionSettings {
+            visitor_group_mode: VisitorGroupMode::Accurate,
+            track_sessions: true,
+            track_utm_params: true,
+            track_geo: GeoDetail::City,
+            data_retention: DataRetention::Days(std::num::NonZeroU32::new(1).unwrap()),
+            allowed_hostnames: Vec::new(),
+            ingest_drop_rules: Vec::new(),
+        };
+        let stats = app.events.prune_entity("entity-1", &settings, false).unwrap();
+        assert_eq!(stats.deleted_events, 1);
+        assert!(!app.events.custom_data(&entities).unwrap().events);
     }
 
     #[test]

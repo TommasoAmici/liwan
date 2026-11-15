@@ -7,7 +7,7 @@ mod stats;
 pub use custom_events::{CustomEventsReport, custom_events_report};
 pub use dimension::dimension_report;
 pub use graph::{build_graph_buckets, overall_report};
-pub use stats::{earliest_timestamp, online_users, overall_stats};
+pub use stats::{earliest_timestamp, overall_stats};
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Utc};

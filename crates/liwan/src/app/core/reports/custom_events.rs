@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::app::DuckDBConn;
 use crate::utils::duckdb::{ParamVec, repeat_vars};
 
-use super::shared::{build_filter_clause, range_events_sql};
+use super::shared::{build_filter_clause, range_events_sql, report_columns};
 use super::{DateRange, DimensionFilter};
 
 /// Counts for one custom event in the selected range.
@@ -44,7 +44,8 @@ pub fn custom_events_report(
     let entity_vars = repeat_vars(entities.len());
     let (filters_sql, filters_params) = build_filter_clause(filters)?;
     let mut params = ParamVec::new();
-    let range_events = range_events_sql(ranges, &mut params);
+    let columns = report_columns(&["event", "entity_id", "visitor_group_id"], None, filters);
+    let range_events = range_events_sql(ranges, &mut params, &columns);
     let range_count = ranges.len();
     params.extend(entities);
     params.extend_from_params(filters_params);
