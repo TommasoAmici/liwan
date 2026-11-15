@@ -120,6 +120,21 @@ pub struct Entity {
     pub display_name: String,
 }
 
+/// A saved campaign link belonging to one project.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UtmTag {
+    pub id: String,
+    pub project_id: String,
+    pub display_name: String,
+    /// The destination URL exactly as the user entered it, after trimming.
+    pub url: String,
+    pub utm_source: Option<String>,
+    pub utm_medium: Option<String>,
+    pub utm_campaign: Option<String>,
+    pub utm_content: Option<String>,
+    pub utm_term: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ApiKey {
     pub id: String,

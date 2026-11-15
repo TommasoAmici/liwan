@@ -9,6 +9,7 @@ mod sessions;
 mod settings;
 mod teams;
 mod users;
+mod utm_tags;
 
 pub use api_keys::{ApiKeyAccess, LiwanApiKeys};
 pub use entities::LiwanEntities;
@@ -23,6 +24,7 @@ pub use sessions::LiwanSessions;
 pub use settings::{LiwanProjectSettings, LiwanSettings};
 pub use teams::LiwanTeams;
 pub use users::LiwanUsers;
+pub use utm_tags::{LiwanUtmTags, UtmTagInput};
 
 #[cfg(feature = "geoip")]
 mod geoip;
