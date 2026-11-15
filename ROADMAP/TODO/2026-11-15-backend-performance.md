@@ -75,7 +75,7 @@ those costs without changing stored events, report results, or any wire format.
       `cargo bench -p liwan --bench ingest -- writer` before and after and put
       both numbers and the machine in the commit body.
 
-- [ ] Batch the exit updates in `LiwanEvents::update_exits`
+- [x] Batch the exit updates in `LiwanEvents::update_exits`
       (`crates/liwan/src/app/core/events.rs:205`). Each expired exit currently
       runs its own `UPDATE` in its own transaction on the blocking pool, so a
       flush after the 30-second delay queue costs one commit per session end.
@@ -329,6 +329,18 @@ Findings worth keeping:
   `large_batches_fall_back_to_the_entity_scan` covers the seed-shaped path.
 - `session_updates_identify_individual_rows` needed its direct call adapted to
   the new argument; its assertions are unchanged.
+
+**Slice 3 notes: exits.** Wrapping the per-exit loop in one transaction made no
+difference (96.8 ms before, 95.6 ms after, 100 exits), because the cost is the
+correlated `select max(...)` subquery each exit runs, not the commit. The slice
+therefore uses the allowed single statement: a values list of exits (chunked at
+1000), a `qualify row_number() ... order by created_at desc = 1` to pick each
+exit's latest matching pageview, and one `update ... from latest`. Measured
+10.3 ms for 100 exits, about 9× faster. `matched` is now the number of updated
+rows, which equals the number of exits that matched unless two exits target the
+same pageview; the only consumer is a debug log. `update_event_exit` is gone;
+`exit_updates_only_the_latest_event_without_a_next_event` now calls
+`update_exits` and asserts one match.
 
 **Slices (2026-11-15).**
 

@@ -5,7 +5,7 @@ use std::time::Duration;
 use chrono::Utc;
 use criterion::{BatchSize, BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use liwan::app::Liwan;
-use liwan::app::models::Event;
+use liwan::app::models::{Event, EventExit};
 use liwan::config::Config;
 use liwan::utils::useragent;
 use liwan::utils::visitor_group_id;
@@ -133,6 +133,41 @@ fn bench_writer(c: &mut Criterion) {
     }
 }
 
+fn bench_exits(c: &mut Criterion) {
+    let app = live_app();
+    let conn = app.events_conn().expect("failed to get events connection");
+    conn.execute(
+        "insert into events (entity_id, visitor_group_id, event, created_at, fqdn, path)
+         select ?1, 'exit-visitor-' || i, 'pageview', now()::timestamp - interval '2 minutes', 'example.com', '/exit'
+         from range(100) t(i)",
+        duckdb::params![ENTITY],
+    )
+    .expect("failed to insert exit pageviews");
+
+    let exits = (0..100)
+        .map(|visitor| EventExit {
+            entity_id: ENTITY.to_string(),
+            visitor_group_id: format!("exit-visitor-{visitor}"),
+            event: "pageview".to_string(),
+            created_at: Utc::now(),
+            fqdn: Some("example.com".to_string()),
+            path: Some("/exit".to_string()),
+        })
+        .collect::<Vec<_>>();
+
+    let mut group = c.benchmark_group("ingest");
+    configure_group(&mut group);
+    group.bench_function("exits", |b| {
+        b.iter(|| {
+            let matched = app.events.update_exits(exits.clone()).expect("failed to update exits");
+            std::hint::black_box(matched)
+        });
+    });
+    group.finish();
+
+    assert_eq!(app.events.update_exits(exits).expect("failed to update exits"), 100);
+}
+
 fn bench_request_helpers(c: &mut Criterion) {
     use url::Url;
 
@@ -179,6 +214,7 @@ fn bench_request_helpers(c: &mut Criterion) {
 
 fn benchmarks(c: &mut Criterion) {
     bench_writer(c);
+    bench_exits(c);
     bench_request_helpers(c);
 }
 

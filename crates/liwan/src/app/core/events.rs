@@ -16,6 +16,10 @@ use crate::utils::duckdb::{ParamVec, repeat_vars};
 
 const EVENT_EXIT_DELAY: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Exits are updated through a values list; chunk it so one flush cannot build
+/// an unbounded parameter list.
+const EXIT_CHUNK: usize = 1000;
+
 #[derive(Clone)]
 pub struct LiwanEvents {
     duckdb: DuckDBPool,
@@ -199,12 +203,63 @@ impl LiwanEvents {
         }
     }
 
-    fn update_exits(&self, exits: Vec<EventExit>) -> Result<usize> {
+    /// Apply delayed exit timestamps in one transaction and return how many
+    /// exits updated a row.
+    /// Apply delayed exit timestamps in one transaction and return how many
+    /// exits updated a row.
+    pub fn update_exits(&self, exits: Vec<EventExit>) -> Result<usize> {
         let conn = self.duckdb.get().context("Failed to get DuckDB connection")?;
+        let tx = conn.unchecked_transaction().context("Failed to start the exit transaction")?;
         let mut matched = 0;
-        for exit in exits {
-            matched += usize::from(update_event_exit(&conn, &exit)?);
+        for chunk in exits.chunks(EXIT_CHUNK) {
+            let mut params = ParamVec::new();
+            let values = chunk
+                .iter()
+                .enumerate()
+                .map(|(index, exit)| {
+                    params.push(index as i64);
+                    params.push(exit.entity_id.as_str());
+                    params.push(exit.visitor_group_id.as_str());
+                    params.push(exit.event.as_str());
+                    params.push(exit.fqdn.as_deref());
+                    params.push(exit.path.as_deref());
+                    params.push(exit.created_at);
+                    "(?::bigint, ?::text, ?::text, ?::text, ?::text, ?::text, ?::timestamp)"
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            let sql = format!(
+                "--sql
+                with
+                    exits(exit_idx, entity_id, visitor_group_id, event, fqdn, path, exited_at) as (values {values}),
+                    latest as (
+                        select e.rowid, x.exit_idx, x.exited_at
+                        from exits x
+                        join events e on
+                            e.entity_id = x.entity_id and
+                            e.visitor_group_id = x.visitor_group_id and
+                            e.event = x.event and
+                            e.fqdn is not distinct from x.fqdn and
+                            e.path is not distinct from x.path and
+                            e.time_to_next_event is null and
+                            e.created_at <= x.exited_at and
+                            e.created_at >= x.exited_at - interval '30 minutes'
+                        qualify row_number() over (partition by x.exit_idx order by e.created_at desc) = 1
+                    )
+                update events
+                    set exited_at = greatest(
+                        coalesce(events.exited_at, events.created_at),
+                        least(latest.exited_at, events.created_at + interval '30 minutes')
+                    )
+                    from latest
+                    where events.rowid = latest.rowid;
+            "
+            );
+            matched += usize::try_from(tx.execute(&sql, duckdb::params_from_iter(params))?)
+                .context("exit update count is too large")?;
         }
+        tx.commit().context("Failed to commit event exits")?;
         Ok(matched)
     }
 
@@ -308,47 +363,6 @@ fn should_rotate_salt(updated_at: DateTime<Utc>, rotation_hour: u8) -> bool {
 
 fn count_rows(conn: &Connection, sql: &str, params: impl duckdb::Params) -> DuckResult<u64> {
     conn.query_row(sql, params, |row| row.get(0))
-}
-
-fn update_event_exit(conn: &Connection, exit: &EventExit) -> DuckResult<bool> {
-    let sql = "--sql
-        update events
-        set exited_at = greatest(
-            coalesce(exited_at, created_at),
-            least($exited_at::timestamp, created_at + interval '30 minutes')
-        )
-        where
-            entity_id = $entity_id and
-            visitor_group_id = $visitor_group_id and
-            event = $event and
-            fqdn is not distinct from $fqdn and
-            path is not distinct from $path and
-            time_to_next_event is null and
-            created_at = (
-                select max(candidate.created_at)
-                from events candidate
-                where
-                    candidate.entity_id = $entity_id and
-                    candidate.visitor_group_id = $visitor_group_id and
-                    candidate.event = $event and
-                    candidate.fqdn is not distinct from $fqdn and
-                    candidate.path is not distinct from $path and
-                    candidate.time_to_next_event is null and
-                    candidate.created_at <= $exited_at::timestamp and
-                    candidate.created_at >= $exited_at::timestamp - interval '30 minutes'
-            )";
-    let updated = conn.execute(
-        sql,
-        duckdb::named_params! {
-            "entity_id": &exit.entity_id,
-            "visitor_group_id": &exit.visitor_group_id,
-            "event": &exit.event,
-            "fqdn": &exit.fqdn,
-            "path": &exit.path,
-            "exited_at": exit.created_at,
-        },
-    )?;
-    Ok(updated > 0)
 }
 
 /// At or below this many changed visitors, the interval update touches only
@@ -577,20 +591,19 @@ mod tests {
         app.events.append(vec![event(first), event(second), custom].into_iter()).expect("failed to append events");
 
         let conn = app.events_conn().expect("failed to get event connection");
-        let matched = update_event_exit(
-            &conn,
-            &EventExit {
+        let matched = app
+            .events
+            .update_exits(vec![EventExit {
                 entity_id: "entity-1".to_string(),
                 visitor_group_id: "visitor-1".to_string(),
                 event: "pageview".to_string(),
                 created_at: second + chrono::Duration::seconds(15),
                 fqdn: Some("example.com".to_string()),
                 path: Some("/docs".to_string()),
-            },
-        )
-        .expect("failed to update exit");
+            }])
+            .expect("failed to update exit");
 
-        assert!(matched);
+        assert_eq!(matched, 1);
         let rows = conn
             .prepare("select exited_at from events order by created_at")
             .expect("failed to prepare query")
@@ -684,6 +697,33 @@ mod tests {
             .collect::<DuckResult<Vec<_>>>()
             .unwrap();
         assert_eq!(rows, vec![(None, Some(60)), (Some(60), None)]);
+    }
+
+    #[test]
+    fn several_exits_are_committed_together() {
+        let app = Liwan::new_memory(Config::default()).unwrap();
+        let created_at = Utc::now() - chrono::Duration::minutes(2);
+        let events = (0..3)
+            .map(|visitor| Event { visitor_group_id: format!("exit-{visitor}"), ..event(created_at) })
+            .collect::<Vec<_>>();
+        app.events.append(events.into_iter()).unwrap();
+
+        let exits = (0..3)
+            .map(|visitor| EventExit {
+                entity_id: "entity-1".to_string(),
+                visitor_group_id: format!("exit-{visitor}"),
+                event: "pageview".to_string(),
+                created_at: created_at + chrono::Duration::seconds(30),
+                fqdn: Some("example.com".to_string()),
+                path: Some("/docs".to_string()),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(app.events.update_exits(exits).unwrap(), 3);
+
+        let conn = app.events_conn().unwrap();
+        let exited: u64 =
+            conn.query_row("select count(*) from events where exited_at is not null", [], |row| row.get(0)).unwrap();
+        assert_eq!(exited, 3);
     }
 
     #[test]
