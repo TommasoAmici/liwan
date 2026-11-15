@@ -511,8 +511,9 @@ async fn project_create_handler(
     Admin(_): Admin,
     Json(project): Json<CreateProjectRequest>,
 ) -> ApiResult<impl IntoApiResponse> {
-    app.projects
-        .create(
+    let app = app.app.clone();
+    tokio::task::spawn_blocking(move || {
+        app.projects.create(
             &Project {
                 id: project_id,
                 display_name: project.display_name,
@@ -521,7 +522,10 @@ async fn project_create_handler(
             },
             project.entities.as_slice(),
         )
-        .http_err("Failed to create project", StatusCode::BAD_REQUEST)?;
+    })
+    .await
+    .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+    .http_err("Failed to create project", StatusCode::BAD_REQUEST)?;
 
     Ok(empty_response())
 }
@@ -533,19 +537,26 @@ async fn project_update_handler(
     Json(req): Json<UpdateProjectRequest>,
 ) -> ApiResult<impl IntoApiResponse> {
     if let Some(project) = req.project {
-        app.projects
-            .update(&Project {
-                id: project_id.clone(),
+        let app = app.app.clone();
+        let project_id = project_id.clone();
+        tokio::task::spawn_blocking(move || {
+            app.projects.update(&Project {
+                id: project_id,
                 display_name: project.display_name,
                 visibility: project.visibility,
                 secret: project.secret,
             })
-            .http_err("Failed to update project", StatusCode::INTERNAL_SERVER_ERROR)?;
+        })
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_err("Failed to update project", StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
     if let Some(entities) = req.entities {
-        app.projects
-            .update_entities(&project_id, entities.as_slice())
+        let app = app.app.clone();
+        tokio::task::spawn_blocking(move || app.projects.update_entities(&project_id, entities.as_slice()))
+            .await
+            .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
             .http_err("Failed to update project entities", StatusCode::BAD_REQUEST)?;
     }
 
@@ -595,7 +606,11 @@ async fn settings_update_handler(
     Admin(_): Admin,
     Json(settings): Json<CollectionSettings>,
 ) -> ApiResult<impl IntoApiResponse> {
-    app.settings.update_global(&settings).http_err("Failed to update collection settings", StatusCode::BAD_REQUEST)?;
+    let app = app.app.clone();
+    tokio::task::spawn_blocking(move || app.settings.update_global(&settings))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_err("Failed to update collection settings", StatusCode::BAD_REQUEST)?;
 
     Ok(empty_response())
 }
@@ -640,10 +655,17 @@ async fn project_settings_handler(
     Path(project_id): Path<String>,
     Admin(_): Admin,
 ) -> ApiResult<Json<ProjectDisplaySettings>> {
-    app.projects.get(&project_id).http_status(StatusCode::NOT_FOUND)?;
-    let settings = app
-        .project_settings
-        .get(&project_id)
+    let lookup = app.app.clone();
+    let lookup_id = project_id.clone();
+    tokio::task::spawn_blocking(move || lookup.projects.get(&lookup_id))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_status(StatusCode::NOT_FOUND)?;
+
+    let app = app.app.clone();
+    let settings = tokio::task::spawn_blocking(move || app.project_settings.get(&project_id))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
         .http_err("Failed to get project display settings", StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(settings))
@@ -655,10 +677,18 @@ async fn project_settings_update_handler(
     Admin(_): Admin,
     Json(mut settings): Json<ProjectDisplaySettings>,
 ) -> ApiResult<impl IntoApiResponse> {
-    app.projects.get(&project_id).http_status(StatusCode::NOT_FOUND)?;
+    let lookup = app.app.clone();
+    let lookup_id = project_id.clone();
+    tokio::task::spawn_blocking(move || lookup.projects.get(&lookup_id))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_status(StatusCode::NOT_FOUND)?;
+
     settings.project_id = project_id;
-    app.project_settings
-        .update(&settings)
+    let app = app.app.clone();
+    tokio::task::spawn_blocking(move || app.project_settings.update(&settings))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
         .http_err("Failed to update project display settings", StatusCode::BAD_REQUEST)?;
 
     Ok(empty_response())
@@ -669,10 +699,17 @@ async fn entity_settings_handler(
     Path(entity_id): Path<String>,
     Admin(_): Admin,
 ) -> ApiResult<Json<EntityCollectionSettingsResponse>> {
-    if !app.entities.exists(&entity_id).http_err("Failed to get entity", StatusCode::INTERNAL_SERVER_ERROR)? {
+    let lookup = app.app.clone();
+    let lookup_id = entity_id.clone();
+    let exists = tokio::task::spawn_blocking(move || lookup.entities.exists(&lookup_id))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_err("Failed to get entity", StatusCode::INTERNAL_SERVER_ERROR)?;
+    if !exists {
         http_bail!(StatusCode::NOT_FOUND, "Entity not found")
     }
 
+    // Both values come from the in-memory settings cache, so no blocking work.
     let settings = app.settings.entity(&entity_id);
     let resolved = app.settings.resolved_for_entity(&entity_id);
     Ok(Json(EntityCollectionSettingsResponse { settings, resolved }))
@@ -684,13 +721,21 @@ async fn entity_settings_update_handler(
     Admin(_): Admin,
     Json(mut settings): Json<EntityCollectionSettings>,
 ) -> ApiResult<impl IntoApiResponse> {
-    if !app.entities.exists(&entity_id).http_err("Failed to get entity", StatusCode::INTERNAL_SERVER_ERROR)? {
+    let lookup = app.app.clone();
+    let lookup_id = entity_id.clone();
+    let exists = tokio::task::spawn_blocking(move || lookup.entities.exists(&lookup_id))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_err("Failed to get entity", StatusCode::INTERNAL_SERVER_ERROR)?;
+    if !exists {
         http_bail!(StatusCode::NOT_FOUND, "Entity not found")
     }
 
     settings.entity_id = entity_id;
-    app.settings
-        .update_entity(&settings)
+    let app = app.app.clone();
+    tokio::task::spawn_blocking(move || app.settings.update_entity(&settings))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
         .http_err("Failed to update entity collection settings", StatusCode::BAD_REQUEST)?;
 
     Ok(empty_response())
@@ -700,9 +745,10 @@ async fn api_keys_handler(
     app: State<RouterState>,
     Admin(_): Admin,
 ) -> ApiResult<UseApi<impl IntoApiResponse, Json<ApiKeysResponse>>> {
-    let keys = app
-        .api_keys
-        .all()
+    let lookup = app.app.clone();
+    let keys = tokio::task::spawn_blocking(move || lookup.api_keys.all())
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
         .http_err("Failed to list API keys", StatusCode::INTERNAL_SERVER_ERROR)?
         .into_iter()
         .map(Into::into)
@@ -715,10 +761,19 @@ async fn api_key_create_handler(
     Admin(user): Admin,
     Json(request): Json<CreateApiKeyRequest>,
 ) -> ApiResult<UseApi<impl IntoApiResponse, Json<CreateApiKeyResponse>>> {
-    let (key, plaintext) = app
-        .api_keys
-        .create(&request.display_name, &request.entities, &request.projects, &request.permissions, request.expiration)
-        .http_err("Failed to create API key", StatusCode::BAD_REQUEST)?;
+    let lookup = app.app.clone();
+    let (key, plaintext) = tokio::task::spawn_blocking(move || {
+        lookup.api_keys.create(
+            &request.display_name,
+            &request.entities,
+            &request.projects,
+            &request.permissions,
+            request.expiration,
+        )
+    })
+    .await
+    .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+    .http_err("Failed to create API key", StatusCode::BAD_REQUEST)?;
     tracing::info!(key_id = key.id, actor = user.username, "Created API key");
     Ok((
         StatusCode::CREATED,
@@ -734,11 +789,21 @@ async fn api_key_update_handler(
     Admin(user): Admin,
     Json(request): Json<UpdateApiKeyRequest>,
 ) -> ApiResult<impl IntoApiResponse> {
-    if !app
-        .api_keys
-        .update(&key_id, &request.display_name, &request.entities, &request.projects, &request.permissions)
-        .http_err("Failed to update API key", StatusCode::BAD_REQUEST)?
-    {
+    let lookup = app.app.clone();
+    let update_id = key_id.clone();
+    let updated = tokio::task::spawn_blocking(move || {
+        lookup.api_keys.update(
+            &update_id,
+            &request.display_name,
+            &request.entities,
+            &request.projects,
+            &request.permissions,
+        )
+    })
+    .await
+    .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+    .http_err("Failed to update API key", StatusCode::BAD_REQUEST)?;
+    if !updated {
         http_bail!(StatusCode::NOT_FOUND, "API key not found")
     }
     tracing::info!(key_id, actor = user.username, "Updated API key access");
@@ -750,7 +815,13 @@ async fn api_key_delete_handler(
     Path(key_id): Path<String>,
     Admin(user): Admin,
 ) -> ApiResult<impl IntoApiResponse> {
-    if !app.api_keys.delete(&key_id).http_err("Failed to delete API key", StatusCode::INTERNAL_SERVER_ERROR)? {
+    let lookup = app.app.clone();
+    let delete_id = key_id.clone();
+    let deleted = tokio::task::spawn_blocking(move || lookup.api_keys.delete(&delete_id))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_err("Failed to delete API key", StatusCode::INTERNAL_SERVER_ERROR)?;
+    if !deleted {
         http_bail!(StatusCode::NOT_FOUND, "API key not found")
     }
     tracing::info!(key_id, actor = user.username, "Deleted API key");
@@ -763,10 +834,13 @@ async fn api_key_regenerate_handler(
     Admin(user): Admin,
     Json(request): Json<RegenerateApiKeyRequest>,
 ) -> ApiResult<UseApi<impl IntoApiResponse, Json<CreateApiKeyResponse>>> {
-    let Some((key, plaintext)) = app
-        .api_keys
-        .regenerate(&key_id, request.expiration)
-        .http_err("Failed to regenerate API key", StatusCode::INTERNAL_SERVER_ERROR)?
+    let lookup = app.app.clone();
+    let regenerate_id = key_id.clone();
+    let Some((key, plaintext)) =
+        tokio::task::spawn_blocking(move || lookup.api_keys.regenerate(&regenerate_id, request.expiration))
+            .await
+            .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+            .http_err("Failed to regenerate API key", StatusCode::INTERNAL_SERVER_ERROR)?
     else {
         http_bail!(StatusCode::NOT_FOUND, "API key not found")
     };
@@ -783,40 +857,58 @@ async fn project_delete_handler(
     Path(project_id): Path<String>,
     Admin(_): Admin,
 ) -> ApiResult<impl IntoApiResponse> {
-    let project = app.projects.get(&project_id).http_status(StatusCode::NOT_FOUND)?;
+    let lookup = app.app.clone();
+    let project = tokio::task::spawn_blocking(move || lookup.projects.get(&project_id))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_status(StatusCode::NOT_FOUND)?;
 
-    app.projects.delete(&project.id).http_err("Failed to delete project", StatusCode::INTERNAL_SERVER_ERROR)?;
+    let app = app.app.clone();
+    tokio::task::spawn_blocking(move || app.projects.delete(&project.id))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_err("Failed to delete project", StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(empty_response())
 }
 
 async fn entities_handler(app: State<RouterState>, MaybeAuth(user): MaybeAuth) -> ApiResult<Json<EntitiesResponse>> {
     let Some(user) = user else { http_bail!(StatusCode::UNAUTHORIZED, "Authentication required") };
-    let entities = app.entities.all().http_err("Failed to get entities", StatusCode::INTERNAL_SERVER_ERROR)?;
+    let app = app.app.clone();
+    let entities = tokio::task::spawn_blocking(move || {
+        let entities = app.entities.all()?;
+        let mut projects = app.entities.projects_by_entity()?;
 
-    let mut resp = Vec::new();
-    for entity in entities {
-        let projects =
-            app.entities.projects(&entity.id).http_err("Failed to get projects", StatusCode::INTERNAL_SERVER_ERROR)?;
-        let visible_projects: Vec<_> =
-            projects.into_iter().filter(|project| can_enumerate_project(project, Some(&user))).collect();
-        if user.role != UserRole::Admin && visible_projects.is_empty() {
-            continue;
-        }
-        resp.push(EntityResponse {
-            id: entity.id.clone(),
-            display_name: entity.display_name.clone(),
-            projects: visible_projects
+        let mut resp = Vec::new();
+        for entity in entities {
+            let visible_projects: Vec<_> = projects
+                .remove(&entity.id)
+                .unwrap_or_default()
                 .into_iter()
-                .map(|project| EntityProject {
-                    id: project.id,
-                    display_name: project.display_name,
-                    visibility: project.visibility,
-                })
-                .collect(),
-        });
-    }
+                .filter(|project| can_enumerate_project(project, Some(&user)))
+                .collect();
+            if user.role != UserRole::Admin && visible_projects.is_empty() {
+                continue;
+            }
+            resp.push(EntityResponse {
+                id: entity.id,
+                display_name: entity.display_name,
+                projects: visible_projects
+                    .into_iter()
+                    .map(|project| EntityProject {
+                        id: project.id,
+                        display_name: project.display_name,
+                        visibility: project.visibility,
+                    })
+                    .collect(),
+            });
+        }
+        anyhow::Ok(resp)
+    })
+    .await
+    .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+    .http_err("Failed to get entities", StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(Json(EntitiesResponse { entities: resp }))
+    Ok(Json(EntitiesResponse { entities }))
 }
 
 async fn entity_create_handler(
@@ -824,14 +916,17 @@ async fn entity_create_handler(
     Admin(_): Admin,
     Json(entity): Json<CreateEntityRequest>,
 ) -> ApiResult<Json<EntityResponse>> {
-    app.entities
-        .create(
-            &Entity { id: entity.id.clone(), display_name: entity.display_name.clone() },
-            entity.projects.as_slice(),
-        )
-        .http_err("Failed to create entity", StatusCode::BAD_REQUEST)?;
+    let response =
+        EntityResponse { id: entity.id.clone(), display_name: entity.display_name.clone(), projects: Vec::new() };
+    let lookup = app.app.clone();
+    tokio::task::spawn_blocking(move || {
+        lookup.entities.create(&Entity { id: entity.id, display_name: entity.display_name }, entity.projects.as_slice())
+    })
+    .await
+    .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+    .http_err("Failed to create entity", StatusCode::BAD_REQUEST)?;
 
-    Ok(Json(EntityResponse { id: entity.id, display_name: entity.display_name, projects: Vec::new() }))
+    Ok(Json(response))
 }
 
 async fn entity_update_handler(
@@ -841,14 +936,19 @@ async fn entity_update_handler(
     Json(entity): Json<UpdateEntityRequest>,
 ) -> ApiResult<impl IntoApiResponse> {
     if let Some(display_name) = entity.display_name {
-        app.entities
-            .update(&Entity { id: entity_id.clone(), display_name })
+        let lookup = app.app.clone();
+        let entity_id = entity_id.clone();
+        tokio::task::spawn_blocking(move || lookup.entities.update(&Entity { id: entity_id, display_name }))
+            .await
+            .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
             .http_err("Failed to update entity", StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
     if let Some(projects) = entity.projects {
-        app.entities
-            .update_projects(&entity_id, projects.as_slice())
+        let lookup = app.app.clone();
+        tokio::task::spawn_blocking(move || lookup.entities.update_projects(&entity_id, projects.as_slice()))
+            .await
+            .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
             .http_err("Failed to update entity projects", StatusCode::BAD_REQUEST)?;
     }
 
@@ -860,8 +960,14 @@ async fn entity_delete_handler(
     Path(entity_id): Path<String>,
     Admin(_): Admin,
 ) -> ApiResult<impl IntoApiResponse> {
-    app.entities.delete(&entity_id).http_err("Failed to delete entity", StatusCode::INTERNAL_SERVER_ERROR)?;
-    app.settings.reload().http_err("Failed to reload collection settings", StatusCode::INTERNAL_SERVER_ERROR)?;
+    let lookup = app.app.clone();
+    tokio::task::spawn_blocking(move || {
+        lookup.entities.delete(&entity_id)?;
+        lookup.settings.reload()
+    })
+    .await
+    .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+    .http_err("Failed to delete entity", StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(empty_response())
 }

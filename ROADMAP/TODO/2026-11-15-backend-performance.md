@@ -171,7 +171,7 @@ those costs without changing stored events, report results, or any wire format.
       session cache and do not add an index on `sessions(username)`; nothing
       hot filters by it.
 
-- [ ] Take the admin database work off the async runtime and fix the entity
+- [x] Take the admin database work off the async runtime and fix the entity
       list. In `crates/liwan/src/web/routes/admin.rs`, the handlers that call
       SQLite directly (`settings_handler:589`, `entity_settings_handler:667`,
       `api_keys_handler:699`, `project_settings_handler:638`,
@@ -392,6 +392,21 @@ case-sensitive compare would log out users who signed in with an uppercase
 letter). No new cache and no index. `--test auth` and `--test dashboard` pass
 unchanged. The five-requests-per-page fan-out remains out of scope as decided;
 this slice only removes the statement parse per authenticated request.
+
+**Slice 10 notes: admin handlers and the entity index.** Every admin handler
+that touches SQLite now runs inside `spawn_blocking`; the two that read only the
+in-memory settings cache (`settings_handler`, the entity settings response after
+the existence check) still run inline. Where an operation had its own status
+(project/entity settings lookup, entity project validation) it kept a separate
+blocking call so a missing row is still `404` and a validation failure `400`.
+The entity list no longer runs one query per entity:
+`LiwanEntities::projects_by_entity` reads the join once and the handler groups
+in memory; `LiwanEntities::projects` is still there for other callers.
+`app_migrations_create_the_entity_index` proves V11 applies, and the existing
+`entities_list_respects_team_access` covers the non-admin visibility rule.
+V11 is one `create index` on the small `project_entities` table: no rows are
+rewritten, and it is the next free number after V9 (funnels) and V10 (UTM
+tags).
 
 **Decisions (2026-11-15, user answers).**
 

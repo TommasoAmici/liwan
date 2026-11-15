@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use quick_cache::sync::Cache;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::app::{SqlitePool, models};
@@ -112,6 +113,33 @@ impl LiwanEntities {
             })
         })?;
         Ok(projects.collect::<Result<Vec<models::Project>, rusqlite::Error>>()?)
+    }
+
+    /// Get every entity's projects in one query, for the entity list screen.
+    pub fn projects_by_entity(&self) -> Result<HashMap<String, Vec<models::Project>>> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare_cached(
+            "select pe.entity_id, p.id, p.display_name, p.visibility, p.secret
+             from project_entities pe join projects p on p.id = pe.project_id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                models::Project {
+                    id: row.get(1)?,
+                    display_name: row.get(2)?,
+                    visibility: row.get(3)?,
+                    secret: row.get(4)?,
+                },
+            ))
+        })?;
+
+        let mut projects: HashMap<String, Vec<models::Project>> = HashMap::new();
+        for row in rows {
+            let (entity_id, project) = row?;
+            projects.entry(entity_id).or_default().push(project);
+        }
+        Ok(projects)
     }
 
     /// Check if an entity exists

@@ -207,4 +207,23 @@ mod tests {
             .unwrap();
         assert!(version.starts_with("v2."), "fresh database uses {version}");
     }
+
+    #[test]
+    fn app_migrations_create_the_entity_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool =
+            super::init_sqlite(&dir.path().join("liwan-app.sqlite"), super::super::embedded::app::migrations::runner())
+                .unwrap();
+
+        let exists: bool = pool
+            .get()
+            .unwrap()
+            .query_row(
+                "select exists(select 1 from sqlite_master where type = 'index' and name = 'project_entities_entity_id')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(exists, "the entity index migration did not apply");
+    }
 }
