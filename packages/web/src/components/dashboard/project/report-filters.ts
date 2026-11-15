@@ -26,34 +26,29 @@ const parseFilter = (entry: unknown): DimensionFilter | undefined => {
 	if (!entry || typeof entry !== "object") return undefined;
 
 	const candidate = entry as Record<string, unknown>;
-	const { dimension, key, filterType, value } = candidate;
+	const { dimension, filterType, value } = candidate;
 	if (!isDimension(dimension) && dimension !== "property") return undefined;
 	if (!isFilterType(filterType)) return undefined;
 	if (!isOptionalBoolean(candidate.inversed) || !isOptionalBoolean(candidate.strict)) return undefined;
 
-	if (dimension === "property") {
-		if (typeof key !== "string" || key.trim() === "") return undefined;
-	} else if (key !== undefined && key !== null) {
-		// The report rejects a key on any other dimension, so drop it rather than the filter.
-		return { dimension, filterType, inversed: candidate.inversed, strict: candidate.strict, value: value as string };
-	}
+	// The report rejects a key on any dimension except property, so drop it
+	// rather than the filter.
+	const key = dimension === "property" ? candidate.key : undefined;
+	if (dimension === "property" && (typeof key !== "string" || key.trim() === "")) return undefined;
 
+	const inversed = candidate.inversed as boolean | undefined;
 	if (dimension === "mobile") {
-		if (!isBooleanFilterType(filterType)) return undefined;
-		return { dimension, filterType, inversed: candidate.inversed as boolean | undefined };
+		return isBooleanFilterType(filterType) ? { dimension, filterType, inversed } : undefined;
 	}
 	if (isBooleanFilterType(filterType)) return undefined;
-
-	if (filterType === "is_null") {
-		return { dimension, filterType, inversed: candidate.inversed as boolean | undefined };
-	}
+	if (filterType === "is_null") return { dimension, key: key as string | undefined, filterType, inversed };
 
 	if (typeof value !== "string" || value === "") return undefined;
 	return {
 		dimension,
-		key: dimension === "property" ? (key as string) : undefined,
+		key: key as string | undefined,
 		filterType,
-		inversed: candidate.inversed as boolean | undefined,
+		inversed,
 		strict: candidate.strict as boolean | undefined,
 		value,
 	};

@@ -59,6 +59,8 @@ describe("report filters in the URL", () => {
 		expect(parseReportFilters(search([{ dimension: "path", key: "plan", filterType: "equal", value: "/" }]))).toEqual([
 			{ dimension: "path", filterType: "equal", inversed: undefined, strict: undefined, value: "/" },
 		]);
+		// A key does not excuse a missing value.
+		expect(parseReportFilters(search([{ dimension: "path", key: "plan", filterType: "equal" }]))).toEqual([]);
 	});
 
 	it("accepts custom-event style null filters", () => {
