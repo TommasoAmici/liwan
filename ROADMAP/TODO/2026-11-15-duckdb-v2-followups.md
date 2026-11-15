@@ -18,7 +18,7 @@ DuckDB recommends for production.
 
 ## Checklist
 
-- [ ] Measure the v2 storage format against v1 on the same data. Use a
+- [x] Measure the v2 storage format against v1 on the same data. Use a
       checkout-local `data_dir` and `mise exec -- cargo dev seed` for ten
       million events over a year. Stop the server, record the events file size,
       then run `mise exec -- cargo run -- upgrade-duckdb` with that config,
@@ -297,6 +297,60 @@ DuckDB recommends for production.
   measurement workflow must start from a clean `data_dir`.
 - The read-back adds one full scan of both files to a manual command. That is
   acceptable for an upgrade but must never run at startup or per report.
+
+**Measurement: v1 and v2 storage (2026-11-15, Apple M4 Pro, 48 GiB, macOS 27.2).**
+
+`cargo dev seed` was asked for ten million events and stored 7,101,811 over the
+last year; the generator stops when the year is used up. A database seeded by
+this revision is already `v2.0.0+`, so the v1 file for the comparison was made
+from the same rows with `COPY FROM DATABASE` into a `STORAGE_VERSION 'v1.5.0'`
+file. Both files are compact copies of the same 7,101,811 events, so the numbers
+below isolate the storage format.
+
+| | v1.5.0 | v2.0.0 |
+|---|---|---|
+| file size (`ls -l`) | 353,906,688 B (337.5 MiB) | 354,430,976 B (338.0 MiB) |
+| `pragma_database_size` | 337.5 MiB, 0 free blocks | 338.0 MiB, 0 free blocks |
+| `count(*)` of `events` | 7,101,811 | 7,101,811 |
+| `sum(hash(properties::varchar))` | 70419795626878733462827723 | identical |
+| `liwan users`, twice | 0.03 s, 0.03 s | 0.03 s, 0.03 s |
+
+The v2 file was 524,288 bytes (0.15%) larger. Report medians from
+`--bench reports` on the same machine; the third column is a second v1 run made
+after the v2 run, because two neighbouring runs are not a stable baseline:
+
+| Benchmark | v1 | v2 | v1 again |
+|---|---|---|---|
+| `report_meta/earliest_timestamp` | 108.91 µs | 107.77 µs | 115.51 µs |
+| `comparison_reports/graph` | 3.43 ms | 3.46 ms | 3.67 ms |
+| `comparison_reports/stats` | 5.21 ms | 5.17 ms | 5.44 ms |
+| `comparison_reports/dimension` | 2.90 ms | 2.87 ms | 2.89 ms |
+| `comparison_reports/custom_events` | 3.58 ms | 3.56 ms | 3.45 ms |
+| `overall_report/metric/Views` | 74.72 ms | 71.25 ms | 72.30 ms |
+| `overall_report/metric/UniqueVisitors` | 109.69 ms | 105.50 ms | 103.44 ms |
+| `overall_report/metric/BounceRate` | 101.29 ms | 97.63 ms | 93.42 ms |
+| `overall_report/metric/AvgTimeOnSite` | 100.72 ms | 94.68 ms | 92.69 ms |
+| `overall_stats/all_metrics` | 43.26 ms | 40.58 ms | 40.05 ms |
+| `custom_events_report/counts` | 14.17 ms | 14.47 ms | 13.01 ms |
+| `utm_tag_stats/20_tags` | 256.37 ms | 247.41 ms | 238.78 ms |
+| `funnel_report/two_step` | 21.55 ms | 22.09 ms | 20.58 ms |
+| `funnel_report/three_step` | 28.98 ms | 28.75 ms | 26.30 ms |
+| `dimension_report/Url/Views` | 22.26 ms | 22.29 ms | 21.43 ms |
+| `dimension_report/Url/UniqueVisitors` | 48.72 ms | 48.10 ms | 44.95 ms |
+| `dimension_report/Url/BounceRate` | 34.89 ms | 34.48 ms | 34.28 ms |
+| `dimension_report/Url/AvgTimeOnSite` | 35.33 ms | 33.58 ms | 34.75 ms |
+
+The differences change sign between groups and the second v1 run beats both, so
+the format is below run-to-run noise on this data and the file is not smaller.
+There is no size or speed win to recommend; the README says so instead.
+
+Conversion cost on the same table: `upgrade-duckdb` took 99.13 s, of which the
+`COPY FROM DATABASE` is about 2.0 s and the row-by-row read-back the rest (the
+comparison SQL alone measured 120 s cold). It needs free disk for a second copy
+of the file. The literal seed-then-upgrade run is different in kind: a fresh
+seed file is an uncompact v2 file (592,195,584 B with 860 free blocks), and
+`upgrade-duckdb` rewrote it to 355,479,552 B in 101.06 s. That is compaction of
+free space, not a property of the new format; do not present it as a v2 win.
 
 **Landmarks.**
 
