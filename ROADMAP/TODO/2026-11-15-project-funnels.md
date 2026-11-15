@@ -138,7 +138,13 @@ overview, so the funnel is a report, not a separate configuration page.
   Implement it with a materialized `candidates` CTE built from
   `range_events_sql`, `entity_id in (...)`, and `build_filter_clause`, followed
   by one `union all` branch per step that selects matching events from
-  `candidates`. Then generate one CTE per step:
+  `candidates`.
+  [2026-11-15-backend-performance.md](2026-11-15-backend-performance.md) may
+  give `range_events_sql` an explicit column list; when you pick this up, use
+  the form on `main` and make `candidates` select every column the steps and
+  filters read (`range_idx`, `event`, `created_at`, `visitor_group_id`,
+  `path`, and whichever column a filter dimension names). The range bounds,
+  rows and counts must not change. Then generate one CTE per step:
 
   ```sql
   step_1 as (
@@ -528,7 +534,16 @@ funnel definitions because the project owns them.
 types in `models.rs`, the new `core/funnels.rs` and `reports/funnels.rs`, the
 funnel routes in `web/routes/dashboard.rs`, the `ProjectResponse` display field,
 the Funnels page, its Features paragraph in `README.md`, and its funnel bullet
-in `CHANGELOG.md`. The shipped DuckDB plan
+in `CHANGELOG.md`.
+[2026-11-15-backend-performance.md](2026-11-15-backend-performance.md)
+changes shared backend code this plan also reads:
+`reports/shared.rs::range_events_sql` may take an explicit column list,
+`reports/mod.rs` loses the unused `online_users` export, and the admin
+handlers in `web/routes/admin.rs` around `ProjectResponse::new` move onto
+`spawn_blocking`. This plan keeps its own additions to `benches/reports.rs`;
+the backend plan adds `benches/ingest.rs` and does not change the report bench
+or `web/routes/dashboard.rs`. Apply its `range_events_sql` form to
+`reports/funnels.rs` if both land. The shipped DuckDB plan
 ([2026-11-15-duckdb-v2.md](../DONE/2026-11-15-duckdb-v2.md)) owns `app/db.rs`,
 `upgrade_db`, the README `## Upgrading` section, and the `### Other` changelog
 bullet. It already added the `## [Unreleased]` and `### Features` headings, so
