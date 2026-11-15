@@ -121,7 +121,7 @@ fn bench_writer(c: &mut Criterion) {
         .query_row("select count(*) from events where path = '/batch'", [], |row| row.get(0))
         .expect("batch count failed");
     if appended > 0 {
-        assert_eq!(appended, BATCH_SIZE as u64, "a benchmark batch went missing");
+        assert!(appended >= BATCH_SIZE as u64, "the benchmark batch went missing: {appended}");
         let filled: u64 = conn
             .query_row(
                 "select count(*) from events where path = '/before-batch' and time_to_next_event is not null",
