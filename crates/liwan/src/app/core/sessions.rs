@@ -32,12 +32,16 @@ impl LiwanSessions {
     pub fn get(&self, session_id: &str) -> Result<Option<models::User>> {
         let conn = self.pool.get()?;
 
-        let user = conn
-            .query_row(
-                "select u.username, u.role from sessions s join users u on lower(u.username) = lower(s.username) where s.id = ? and s.expires_at > ?",
-                rusqlite::params![session_id, Utc::now()],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
+        // The `lower()` comparison stays: `login` stores the username as the
+        // user typed it, so dropping it would log out every user who signed in
+        // with an uppercase letter.
+        let mut session = conn.prepare_cached(
+            "select u.username, u.role from sessions s join users u on lower(u.username) = lower(s.username) where s.id = ? and s.expires_at > ?",
+        )?;
+        let user = session
+            .query_row(rusqlite::params![session_id, Utc::now()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
             .optional()?;
         let Some((username, role)) = user else { return Ok(None) };
 

@@ -158,7 +158,7 @@ those costs without changing stored events, report results, or any wire format.
       rewrites links. Prove the page-load change with the `strobe` skill on a
       local server before and after; a unit-test timing is not enough here.
 
-- [ ] Prepare the session query. `LiwanSessions::get`
+- [x] Prepare the session query. `LiwanSessions::get`
       (`crates/liwan/src/app/core/sessions.rs:32`) runs the session/user join
       through `query_row` (no prepared statement) and then a prepared teams
       query, on every authenticated dashboard request. Use `prepare_cached` for
@@ -385,6 +385,13 @@ measurement: 22.1 µs to render from scratch, 381 ns for a cache hit, so about
 profile cannot resolve that against noise, so the number above replaces the
 profile the plan asked for. `tests/serve.rs` covers body/ETag stability, `304`,
 and a base-path render. No non-HTML file changed.
+
+**Slice 9 notes: session lookup.** The session/user join now goes through
+`prepare_cached`, with a comment on why the `lower()` comparison stays (a
+case-sensitive compare would log out users who signed in with an uppercase
+letter). No new cache and no index. `--test auth` and `--test dashboard` pass
+unchanged. The five-requests-per-page fan-out remains out of scope as decided;
+this slice only removes the statement parse per authenticated request.
 
 **Decisions (2026-11-15, user answers).**
 
