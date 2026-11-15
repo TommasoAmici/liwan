@@ -79,7 +79,7 @@ pub(super) struct ProcessEventRequest {
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
-struct Utm {
+pub struct Utm {
     source: Option<String>,
     content: Option<String>,
     medium: Option<String>,
@@ -93,7 +93,7 @@ fn extract_query(url: &Url, keys: &[&str]) -> Option<String> {
         .filter(|value| !value.trim().is_empty() && value.len() <= 255)
 }
 
-fn extract_utm(url: &Url) -> Utm {
+pub fn extract_utm(url: &Url) -> Utm {
     Utm {
         campaign: extract_query(url, &["utm_campaign", "campaign"]),
         content: extract_query(url, &["utm_content", "content"]),

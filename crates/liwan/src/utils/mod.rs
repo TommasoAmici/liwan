@@ -11,9 +11,11 @@ pub(crate) mod refinery_sqlite;
 pub(crate) mod seed;
 pub mod serde;
 pub(crate) mod signals;
-pub(crate) mod useragent;
+pub mod useragent;
 pub(crate) mod validate;
 pub(crate) mod writable;
+
+pub use hash::visitor_group_id;
 
 pub(crate) fn encode_hex(bytes: &[u8]) -> String {
     use std::fmt::Write;

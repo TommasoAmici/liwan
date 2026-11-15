@@ -13,7 +13,7 @@ those costs without changing stored events, report results, or any wire format.
 
 ## Checklist
 
-- [ ] Add `crates/liwan/benches/ingest.rs` and register it in
+- [x] Add `crates/liwan/benches/ingest.rs` and register it in
       `crates/liwan/Cargo.toml` (`[[bench]] name = "ingest", harness = false`,
       next to `reports`). Run it on the current code first and keep the numbers.
       Use an in-memory `Liwan::new_memory(Config::default())` and generate the
@@ -266,6 +266,34 @@ The writer number is the one that matters: work per batch is proportional to
 sessions in the last 24 hours, and batches per day grow with pageviews, so the
 total grows with the square of traffic. At 1M pageviews/day that update is
 about 95% of the write path.
+
+**Baseline (2026-11-15, Apple M4 Pro, `bench` profile).** `crates/liwan/benches/ingest.rs`
+was added and run before any code change. The writer case seeds 1,000,000
+pageviews over 24 hours for one entity and appends 512 events whose 512
+visitors each have three previous pageviews in the last minutes:
+
+| Benchmark | Result |
+|---|---|
+| `ingest/writer` | 59.4 ms median (53.1–63.9) per 512 events, 8.6 Kelem/s |
+| `ingest/parse_user_agent` (cache hit) | 51.9 ns |
+| `ingest/crawler_check` | 51.8 ns |
+| `ingest/extract_utm` (5 UTM values plus 2 aliases) | 691 ns |
+| `ingest/visitor_group_id` | 313 ns |
+| `ingest/hostname_allowed_empty` | 15.3 ns |
+| `ingest/hostname_allowed_matching` | 18.4 ns |
+
+The bench is self-contained (in-memory DuckDB, no config file, no seeded
+database), so it runs in CI and on a laptop the same way. Running a single case
+with a filter skips the writer assertions; they only run when at least one
+batch was appended.
+
+Visibility changes needed for an external bench target: `utils::useragent` is a
+public module, `utils::visitor_group_id` is re-exported, and
+`web::routes::event::{Utm, extract_utm}` are public. None of them change
+behaviour. `Liwan::new_memory` was already outside the debug-only impl block, so
+a bench profile can use it.
+
+**Slices (2026-11-15).**
 
 **Decisions (2026-11-15, user answers).**
 
