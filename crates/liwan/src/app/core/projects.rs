@@ -139,6 +139,7 @@ impl LiwanProjects {
         let tx = conn.transaction()?;
         tx.execute("delete from project_settings where project_id = ?", rusqlite::params![id])?;
         tx.execute("delete from project_utm_tags where project_id = ?", rusqlite::params![id])?;
+        tx.execute("delete from funnels where project_id = ?", rusqlite::params![id])?;
         tx.execute("delete from api_key_projects where project_id = ?", rusqlite::params![id])?;
         tx.execute("delete from team_projects where project_id = ?", [id])?;
         tx.execute("delete from projects where id = ?", rusqlite::params![id])?;

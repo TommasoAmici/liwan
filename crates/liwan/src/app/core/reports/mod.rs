@@ -1,5 +1,6 @@
 mod custom_events;
 mod dimension;
+mod funnels;
 mod graph;
 mod shared;
 mod stats;
@@ -7,6 +8,7 @@ mod utm_tags;
 
 pub use custom_events::{CustomEventsReport, custom_events_report};
 pub use dimension::dimension_report;
+pub use funnels::{FunnelReport, funnel_report};
 pub use graph::{build_graph_buckets, overall_report};
 pub use stats::{earliest_timestamp, overall_stats};
 pub use utm_tags::{UtmTagSummary, utm_tag_summary};

@@ -267,7 +267,7 @@ async fn private_projects() -> Result<()> {
 
     let res = client.get_with_headers("/api/dashboard/projects", assigned_header.clone()).await;
     assert_eq!(res.header("cache-control"), "private");
-    res.assert_json(&json!({"projects": [{"displayName": "Private Project", "id": "private-project", "visibility": "private", "entities": [], "hiddenMetrics": [], "hiddenDimensions": ["property"], "customEventsHidden": true}]}));
+    res.assert_json(&json!({"projects": [{"displayName": "Private Project", "id": "private-project", "visibility": "private", "entities": [], "hiddenMetrics": [], "hiddenDimensions": ["property"], "customEventsDisplay": "auto", "customEventsHidden": true}]}));
 
     let prefix = "/api/dashboard/project/private-project";
     let start = (Utc::now() - Duration::hours(1)).to_rfc3339();

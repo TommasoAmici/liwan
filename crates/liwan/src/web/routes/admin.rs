@@ -14,8 +14,9 @@ use crate::{
     PASSWORD_MIN_LENGTH,
     app::{
         models::{
-            AccessPermission, AccessScope, ApiKeyExpiration, CollectionSettings, Entity, EntityCollectionSettings,
-            Project, ProjectDisplaySettings, ProjectVisibility, ResolvedCollectionSettings, UserRole,
+            AccessPermission, AccessScope, ApiKeyExpiration, CollectionSettings, DisplayOverride, Entity,
+            EntityCollectionSettings, Project, ProjectDisplaySettings, ProjectVisibility, ResolvedCollectionSettings,
+            UserRole,
         },
         reports::{Dimension, Metric},
     },
@@ -160,6 +161,8 @@ pub struct ProjectResponse {
     pub visibility: ProjectVisibility,
     pub hidden_metrics: Vec<Metric>,
     pub hidden_dimensions: Vec<Dimension>,
+    /// The raw custom-events override, so the dashboard can tell "hidden" from "no events yet".
+    pub custom_events_display: DisplayOverride,
     pub custom_events_hidden: bool,
 }
 
@@ -191,6 +194,7 @@ impl ProjectResponse {
                 .map(|entity| ProjectEntity { id: entity.id, display_name: entity.display_name })
                 .collect(),
             visibility: project.visibility,
+            custom_events_display: display.custom_events_display(),
             custom_events_hidden: display.is_custom_events_hidden(data),
             hidden_metrics: Metric::all()
                 .iter()

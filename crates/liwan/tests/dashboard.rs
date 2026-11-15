@@ -1,8 +1,9 @@
 mod common;
 use anyhow::Result;
 use chrono::{Duration, Utc};
-use liwan::app::models::ProjectVisibility;
+use liwan::app::models::{DisplayOverride, FunnelMatch, FunnelStep, ProjectDisplaySettings, ProjectVisibility};
 use serde_json::json;
+use std::collections::BTreeMap;
 
 #[tokio::test]
 async fn graph_preserves_partial_buckets() -> Result<()> {
@@ -328,5 +329,193 @@ async fn test_dashboard() -> Result<()> {
         res.assert_status_success();
     }
 
+    Ok(())
+}
+
+fn page(path: &str) -> FunnelStep {
+    FunnelStep::Page { path: path.into(), match_type: FunnelMatch::Equal }
+}
+
+fn event(name: &str) -> FunnelStep {
+    FunnelStep::Event { name: name.into() }
+}
+
+fn insert_event(
+    app: &liwan::app::Liwan,
+    visitor: &str,
+    name: &str,
+    path: &str,
+    time: &str,
+    country: Option<&str>,
+) -> Result<()> {
+    app.events_conn()?.execute(
+        "insert into events (entity_id, visitor_group_id, event, created_at, path, country) values ('entity-1', ?, ?, ?, ?, ?)",
+        duckdb::params![visitor, name, time.parse::<chrono::DateTime<Utc>>()?, path, country],
+    )?;
+    Ok(())
+}
+
+fn funnel_report_body(filters: serde_json::Value) -> serde_json::Value {
+    json!({
+        "ranges": [{ "start": "2026-01-01T00:00:00Z", "end": "2026-01-02T00:00:00Z" }],
+        "filters": filters,
+    })
+}
+
+#[tokio::test]
+async fn funnel_reports_count_cumulative_visitor_groups() -> Result<()> {
+    let app = common::app();
+    let (queues, _receivers) = common::events();
+    let client = common::TestClient::new(app.clone(), queues);
+    app.seed_database(0)?;
+    let funnel =
+        app.funnels.create("public-project", "Signup", &[page("/pricing"), event("signup"), event("purchase")])?;
+    for (visitor, events) in [
+        ("one", vec![("pageview", "/pricing", 0), ("signup", "/", 1), ("purchase", "/", 2)]),
+        ("two", vec![("pageview", "/pricing", 0), ("signup", "/", 1)]),
+        ("three", vec![("pageview", "/pricing", 0)]),
+        ("four", vec![("signup", "/", 0), ("purchase", "/", 1)]),
+    ] {
+        for (name, path, minutes) in events {
+            let time = format!("2026-01-01T10:{minutes:02}:00Z");
+            insert_event(&app, visitor, name, path, &time, None)?;
+        }
+    }
+
+    let response = client
+        .post(
+            &format!("/api/dashboard/project/public-project/funnels/{}/report", funnel.id),
+            funnel_report_body(json!([])),
+        )
+        .await;
+    response.assert_status_success();
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["reports"][0]["counts"], json!([3, 2, 1]));
+    Ok(())
+}
+
+#[tokio::test]
+async fn funnel_reports_follow_range_order() -> Result<()> {
+    let app = common::app();
+    let (queues, _receivers) = common::events();
+    let client = common::TestClient::new(app.clone(), queues);
+    app.seed_database(0)?;
+    let funnel = app.funnels.create("public-project", "Signup", &[page("/pricing"), event("signup")])?;
+    insert_event(&app, "one", "pageview", "/pricing", "2026-01-01T10:00:00Z", None)?;
+    insert_event(&app, "one", "signup", "/", "2026-01-01T10:01:00Z", None)?;
+    insert_event(&app, "two", "pageview", "/pricing", "2026-01-02T10:00:00Z", None)?;
+
+    let response = client
+        .post(
+            &format!("/api/dashboard/project/public-project/funnels/{}/report", funnel.id),
+            json!({
+                "ranges": [
+                    { "start": "2026-01-02T00:00:00Z", "end": "2026-01-03T00:00:00Z" },
+                    { "start": "2026-01-01T00:00:00Z", "end": "2026-01-02T00:00:00Z" },
+                ],
+                "filters": [],
+            }),
+        )
+        .await;
+    response.assert_status_success();
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["reports"][0]["counts"], json!([1, 0]));
+    assert_eq!(body["reports"][1]["counts"], json!([1, 1]));
+    Ok(())
+}
+
+#[tokio::test]
+async fn funnel_filters_apply_to_every_step() -> Result<()> {
+    let app = common::app();
+    let (queues, _receivers) = common::events();
+    let client = common::TestClient::new(app.clone(), queues);
+    app.seed_database(0)?;
+    let funnel =
+        app.funnels.create("public-project", "Signup", &[page("/pricing"), event("signup"), event("purchase")])?;
+    // Every event of group one is in the US.
+    insert_event(&app, "one", "pageview", "/pricing", "2026-01-01T10:00:00Z", Some("US"))?;
+    insert_event(&app, "one", "signup", "/", "2026-01-01T10:01:00Z", Some("US"))?;
+    insert_event(&app, "one", "purchase", "/", "2026-01-01T10:02:00Z", Some("US"))?;
+    // Group two enters from the US but continues in Germany.
+    insert_event(&app, "two", "pageview", "/pricing", "2026-01-01T11:00:00Z", Some("US"))?;
+    insert_event(&app, "two", "signup", "/", "2026-01-01T11:01:00Z", Some("DE"))?;
+    insert_event(&app, "two", "purchase", "/", "2026-01-01T11:02:00Z", Some("DE"))?;
+
+    let response = client
+        .post(
+            &format!("/api/dashboard/project/public-project/funnels/{}/report", funnel.id),
+            funnel_report_body(json!([{ "dimension": "country", "filterType": "equal", "value": "US" }])),
+        )
+        .await;
+    response.assert_status_success();
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["reports"][0]["counts"], json!([2, 1, 1]));
+    Ok(())
+}
+
+#[tokio::test]
+async fn funnel_reports_reject_bad_requests() -> Result<()> {
+    let app = common::app();
+    let (queues, _receivers) = common::events();
+    let client = common::TestClient::new(app.clone(), queues);
+    app.seed_database(0)?;
+    let funnel = app.funnels.create("public-project", "Signup", &[page("/pricing"), event("signup")])?;
+    let url = format!("/api/dashboard/project/public-project/funnels/{}/report", funnel.id);
+
+    client
+        .post(&url, funnel_report_body(json!([{ "dimension": "url_entry", "filterType": "equal", "value": "/" }])))
+        .await
+        .assert_status_bad_request();
+    client
+        .post(&url, funnel_report_body(json!([{ "dimension": "url_exit", "filterType": "equal", "value": "/" }])))
+        .await
+        .assert_status_bad_request();
+    client.post(&url, funnel_report_body(json!([]))).await.assert_status_success();
+    client
+        .post("/api/dashboard/project/public-project/funnels/missing/report", funnel_report_body(json!([])))
+        .await
+        .assert_status_not_found();
+
+    // A funnel from another project is not reachable through this project's URL.
+    let admin = common::login(&client, "admin", "admin").await;
+    client
+        .post_with_headers(
+            &format!("/api/dashboard/project/private-project/funnels/{}/report", funnel.id),
+            funnel_report_body(json!([])),
+            vec![("cookie".into(), common::cookie_header(&admin))],
+        )
+        .await
+        .assert_status_not_found();
+    Ok(())
+}
+
+#[tokio::test]
+async fn hidden_custom_events_only_block_event_funnels() -> Result<()> {
+    let app = common::app();
+    let (queues, _receivers) = common::events();
+    let client = common::TestClient::new(app.clone(), queues);
+    app.seed_database(0)?;
+    let pages = app.funnels.create("public-project", "Browse", &[page("/pricing"), page("/signup")])?;
+    let events = app.funnels.create("public-project", "Signup", &[page("/pricing"), event("signup")])?;
+    app.project_settings.update(&ProjectDisplaySettings {
+        project_id: "public-project".into(),
+        metric_display_overrides: BTreeMap::from([("custom_events".into(), DisplayOverride::Hide)]),
+        ..Default::default()
+    })?;
+
+    client
+        .post(
+            &format!("/api/dashboard/project/public-project/funnels/{}/report", pages.id),
+            funnel_report_body(json!([])),
+        )
+        .await
+        .assert_status_success();
+    client
+        .post(
+            &format!("/api/dashboard/project/public-project/funnels/{}/report", events.id),
+            funnel_report_body(json!([])),
+        )
+        .await
+        .assert_status_bad_request();
     Ok(())
 }

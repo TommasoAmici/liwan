@@ -1,7 +1,7 @@
 use chrono::{Days, Utc};
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use liwan::app::Liwan;
-use liwan::app::models::UtmTag;
+use liwan::app::models::{FunnelMatch, FunnelStep, UtmTag};
 use liwan::app::reports::{self, DateRange, Dimension, GraphInterval, Metric};
 use liwan::config::Config;
 use std::time::Duration;
@@ -197,6 +197,31 @@ fn benchmark_reports(c: &mut Criterion) {
         let tags = benchmark_utm_tags();
         group.bench_function("20_tags", |b| {
             b.iter(|| reports::utm_tag_summary(&conn, &entities, &tags, &ranges[0]).expect("utm_tag_summary failed"));
+        });
+        group.finish();
+    }
+
+    {
+        let mut group = c.benchmark_group("funnel_report");
+        configure_group(&mut group);
+        let two_step = [
+            FunnelStep::Page { path: "/pricing".into(), match_type: FunnelMatch::Equal },
+            FunnelStep::Event { name: "signup".into() },
+        ];
+        let three_step = [
+            FunnelStep::Page { path: "/pricing".into(), match_type: FunnelMatch::Equal },
+            FunnelStep::Event { name: "signup".into() },
+            FunnelStep::Event { name: "purchase".into() },
+        ];
+        group.bench_function("two_step", |b| {
+            b.iter(|| {
+                reports::funnel_report(&conn, &entities, &two_step, &ranges, &[]).expect("two-step funnel failed")
+            })
+        });
+        group.bench_function("three_step", |b| {
+            b.iter(|| {
+                reports::funnel_report(&conn, &entities, &three_step, &ranges, &[]).expect("three-step funnel failed")
+            })
         });
         group.finish();
     }
