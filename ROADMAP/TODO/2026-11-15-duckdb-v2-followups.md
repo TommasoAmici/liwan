@@ -342,7 +342,9 @@ after the v2 run, because two neighbouring runs are not a stable baseline:
 
 The differences change sign between groups and the second v1 run beats both, so
 the format is below run-to-run noise on this data and the file is not smaller.
-There is no size or speed win to recommend; the README says so instead.
+There is no size or speed win to recommend; the README says so instead. The
+command timings in this section come from the debug binary (`cargo run`), which
+is what the plan's workflow uses; a release binary would be faster.
 
 Conversion cost on the same table: `upgrade-duckdb` took 99.13 s, of which the
 `COPY FROM DATABASE` is about 2.0 s and the row-by-row read-back the rest (the
@@ -394,8 +396,8 @@ reports returned the same values with no limit and with
 `overall_stats` 162 vs 157 ms, the overall views report 234 vs 255 ms, the path
 dimension 51 ms both, property keys 111 vs 112 ms, and the `theme` property
 dimension 90 vs 91 ms. At 256 MB DuckDB spilled up to 89,063,424 bytes
-(84.9 MiB) into `liwan-events.duckdb.tmp` beside the events file and removed it
-when the run ended. The only difference was the last digits of
+(84.9 MiB) into `liwan-events.duckdb.tmp` beside the events file during the
+run. The only difference was the last digits of
 `avg_time_on_site` (2.355639903433288 vs 2.3556399034332824), a float
 summation-order effect.
 
