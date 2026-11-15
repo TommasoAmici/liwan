@@ -124,7 +124,7 @@ DuckDB recommends for production.
       changelog line: the setting already exists and its behavior is what
       changed.
 
-- [ ] Spike `VARIANT` against the current map before changing anything. This is
+- [x] Spike `VARIANT` against the current map before changing anything. This is
       a decision gate, not production code. Use a throwaway test (removed
       before the commit) on a copy of the seeded data and measure:
 
@@ -403,6 +403,61 @@ At `memory_limit = 128MB` `overall_stats` fails with `Out of Memory Error:
 could not allocate block of size 256.0 KiB (121.8 MiB/122.0 MiB used)`, so the
 comment in `data/config.example.toml` says a very small limit can still make
 the heaviest reports fail. No default changed and no config key was added.
+
+**VARIANT spike (2026-11-15, DuckDB 2.0.0 through `duckdb` 1.20000.2).**
+
+A throwaway example measured the writers, the property queries and the storage
+size, then prototyped the migration on the compact 7,101,811-row file. No spike
+code is in this commit.
+
+Write path, median of 40 batches of 512 rows in an in-memory database:
+
+| writer | ms per batch | stored variant |
+|---|---|---|
+| today's `map(varchar, varchar)` appender | 3.36 ms | map |
+| (a) appender with a JSON string on a `VARIANT` column | 5.30 ms (+58%) | `VARCHAR`, not an object |
+| (b) `INSERT ... SELECT ?::JSON::VARIANT` per row, one transaction per batch | 784 ms (+232×) | `OBJECT` |
+| (c) appender, then `UPDATE ... = properties::varchar::json::variant` | 8.10 ms (+141%) | `OBJECT` |
+
+Only (b) and (c) store an object and both miss the 10% budget by a wide margin;
+(a) is the only path near the budget but it stores a string, so the driver fact
+holds. A production writer would have to replace the appender or add a second
+write per batch, undoing the ingest work in the backend-performance plan.
+
+Query path, 1,000,000 rows with four keys:
+
+| query | map | variant |
+|---|---|---|
+| equality filter on one key | 19.5 ms | 28.6 ms (+46.5%) |
+| dimension with a key | 23.9 ms | 32.2 ms (+34.7%) |
+| dimension without a key (`variant_keys`) | 32.8 ms | 63.9 ms (+94.5%) |
+
+Storage for the same 1,000,000 rows in separate files: map 4,730,880 B
+(4.5 MiB), variant 2,109,440 B (2.0 MiB), 55% smaller. The fixture repeats four
+fixed keys in every row, which is the best case for shredding; real property
+keys vary by event name, so the 55% does not carry over to the events table.
+
+Conversion prototype on the compact 7,101,811-row file: the four statements and
+a `CHECKPOINT` took 201.5 s in a debug build, grew the file to a
+763,899,904 B peak (409,468,928 B, 1.16× the file) and left all 7,101,811 rows
+readable as `OBJECT`. The two-minute gate is missed on time; a release build
+would be faster, but the write-path condition already decides the outcome.
+
+The gate fails: condition 1 (one write path, an object, within 10%) fails,
+condition 2 passes on the storage number alone while every query is slower, and
+condition 3 passes on free disk but misses the time. Item 6 is not built and
+the map stays.
+
+Driver facts, verified in the local cargo registry:
+`duckdb-1.20000.2/src/statement.rs:737` (`assert_variant_decode_error`) pins
+`FromSqlConversionFailure(idx, Type::Variant, ...)` with "decoding Variant
+columns is not supported", and
+`duckdb-1.20000.2/src/appender/mod.rs:465`
+(`test_appender_variant_columns_delegate_to_duckdb`) appends plain strings to a
+`VARIANT` column. The spike also found that a `variant_extract(...)::varchar`
+that evaluates to SQL NULL cannot be read as a String through this driver
+(`InvalidColumnType(..., Null)`), so a production read would have to coalesce
+or exclude NULLs explicitly.
 
 **Landmarks.**
 
