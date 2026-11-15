@@ -5,7 +5,7 @@ pub mod models;
 pub use core::reports;
 pub use core::{
     ExternalAuthLogin, ExternalAuthProvider, ExternalAuthSettings, ExternalAuthStart, GroupTeamMapping,
-    LiwanExternalAuth, LiwanUtmTags, UtmTagInput,
+    LiwanExternalAuth, LiwanUtmTags, UtmTagInput, validate_utm_tag,
 };
 use std::sync::Arc;
 

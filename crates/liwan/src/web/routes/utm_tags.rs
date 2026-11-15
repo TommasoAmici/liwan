@@ -12,11 +12,12 @@ use crate::app::{
     UtmTagInput,
     models::UtmTag,
     reports::{self, DateRange, UtmTagSummary},
+    validate_utm_tag,
 };
 use crate::web::RouterState;
 use crate::web::routes::dashboard::{report_project, run_report};
 use crate::web::session::{Admin, MaybeAuth};
-use crate::web::webext::{ApiResult, AxumErrExt, empty_response, http_bail};
+use crate::web::webext::{ApiError, ApiResult, AxumErrExt, empty_response, http_bail};
 
 pub fn router() -> ApiRouter<RouterState> {
     ApiRouter::new()
@@ -133,19 +134,29 @@ fn saved(tag: UtmTag) -> Json<UtmTagResponse> {
     Json(UtmTagResponse::from(&tag))
 }
 
+/// Validate in the handler as well as in the store so the client sees the rule
+/// that failed, not a generic message.
+fn validated(request: UtmTagRequest) -> ApiResult<UtmTagInput> {
+    validate_utm_tag(request.into()).map_err(|error| ApiError {
+        message: error.to_string(),
+        status: StatusCode::BAD_REQUEST,
+        retry_after: None,
+    })
+}
+
 async fn create_handler(
     app: State<RouterState>,
     Path(project_id): Path<String>,
     Admin(_): Admin,
     Json(request): Json<UtmTagRequest>,
 ) -> ApiResult<Json<UtmTagResponse>> {
+    let input = validated(request)?;
     require_project(&app, &project_id).await?;
     let app = app.app.clone();
-    let input: UtmTagInput = request.into();
     let tag = spawn_blocking(move || app.utm_tags.create(&project_id, &input))
         .await
         .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
-        .http_err("Failed to create UTM tag", StatusCode::BAD_REQUEST)?;
+        .http_err("Failed to create UTM tag", StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(saved(tag))
 }
 
@@ -155,13 +166,13 @@ async fn update_handler(
     Admin(_): Admin,
     Json(request): Json<UtmTagRequest>,
 ) -> ApiResult<Json<UtmTagResponse>> {
+    let input = validated(request)?;
     require_project(&app, &project_id).await?;
     let app = app.app.clone();
-    let input: UtmTagInput = request.into();
     let tag = spawn_blocking(move || app.utm_tags.update(&project_id, &tag_id, &input))
         .await
         .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
-        .http_err("Failed to update UTM tag", StatusCode::BAD_REQUEST)?
+        .http_err("Failed to update UTM tag", StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
     Ok(saved(tag))
 }

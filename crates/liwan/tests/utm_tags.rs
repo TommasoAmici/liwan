@@ -89,17 +89,20 @@ async fn invalid_tags_are_rejected_with_a_message() -> Result<()> {
     let headers = admin_headers(&common::login(&client, "admin", "admin").await);
     let path = "/api/dashboard/project/public-project/utm-tags";
 
-    for body in [
-        json!({ "displayName": "  ", "url": "https://example.com", "utmSource": "newsletter" }),
-        json!({ "displayName": "Tag", "url": "example.com", "utmSource": "newsletter" }),
-        json!({ "displayName": "Tag", "url": "ftp://example.com", "utmSource": "newsletter" }),
-        json!({ "displayName": "Tag", "url": "https://example.com" }),
-        json!({ "displayName": "Tag", "url": "https://example.com", "utmSource": "a".repeat(201) }),
+    for (body, expected) in [
+        (json!({ "displayName": "  ", "url": "https://example.com", "utmSource": "newsletter" }), "Name"),
+        (json!({ "displayName": "Tag", "url": "example.com", "utmSource": "newsletter" }), "URL"),
+        (json!({ "displayName": "Tag", "url": "ftp://example.com", "utmSource": "newsletter" }), "http"),
+        (json!({ "displayName": "Tag", "url": "https://example.com" }), "UTM"),
+        (json!({ "displayName": "Tag", "url": "https://example.com", "utmSource": "a".repeat(201) }), "Source"),
     ] {
         let response = client.post_with_headers(path, body.clone(), headers.clone()).await;
         response.assert_status_bad_request();
         let response: serde_json::Value = response.json();
-        assert!(response["message"].as_str().is_some_and(|message| !message.is_empty()), "missing message for {body}");
+        assert!(
+            response["message"].as_str().is_some_and(|message| message.contains(expected)),
+            "message for {body} should mention {expected}, got {response}"
+        );
     }
 
     let created = client.post_with_headers(path, tag_body("Kept"), headers.clone()).await;

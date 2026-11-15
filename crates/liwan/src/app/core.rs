@@ -24,7 +24,7 @@ pub use sessions::LiwanSessions;
 pub use settings::{LiwanProjectSettings, LiwanSettings};
 pub use teams::LiwanTeams;
 pub use users::LiwanUsers;
-pub use utm_tags::{LiwanUtmTags, UtmTagInput};
+pub use utm_tags::{LiwanUtmTags, UtmTagInput, validate_utm_tag};
 
 #[cfg(feature = "geoip")]
 mod geoip;
