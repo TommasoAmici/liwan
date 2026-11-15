@@ -71,7 +71,55 @@ pub(super) fn init_duckdb(
         }
     }
 
+    warn_on_outdated_storage_version(&pool);
+
     Ok(pool)
+}
+
+/// Parse the major version out of a DuckDB `storage_version` tag such as
+/// `v2.0.0+`. Returns `None` for anything that does not start with `v<digits>`.
+fn storage_major(version: &str) -> Option<u32> {
+    let digits: String = version.strip_prefix('v')?.chars().take_while(char::is_ascii_digit).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+/// Tell the operator once when the event database still uses the pre-2.0
+/// storage format, which keeps working with the bundled engine.
+///
+/// Reading the tag must never stop startup, so every failure is logged at
+/// debug level: the conversion is an explicit `liwan upgrade-duckdb` run, not
+/// something Liwan does on its own.
+fn warn_on_outdated_storage_version(pool: &r2d2::Pool<DuckdbConnectionManager>) {
+    let read = || -> Result<String> {
+        let conn = pool.get()?;
+        Ok(conn.query_row(
+            "SELECT tags['storage_version'] FROM duckdb_databases() \
+             WHERE database_name NOT IN ('system', 'temp')",
+            [],
+            |row| row.get(0),
+        )?)
+    };
+
+    let version = match read() {
+        Ok(version) => version,
+        Err(err) => {
+            tracing::debug!(error = %err, "Could not read the DuckDB storage version");
+            return;
+        }
+    };
+
+    match storage_major(&version) {
+        Some(major) if major < 2 => tracing::warn!(
+            storage_version = %version,
+            "The event database still uses the old DuckDB storage format; run `liwan upgrade-duckdb` \
+             with Liwan stopped to convert it. The original file is kept as .old"
+        ),
+        Some(_) => {}
+        None => tracing::debug!(storage_version = %version, "Unrecognized DuckDB storage version"),
+    }
 }
 
 pub fn init_duckdb_mem(mut migrations_runner: Runner) -> Result<r2d2::Pool<DuckdbConnectionManager>> {
@@ -117,4 +165,24 @@ pub fn init_sqlite_mem(mut migrations_runner: Runner) -> Result<r2d2::Pool<Sqlit
     migrations_runner.run(&mut RqlConnection(pool.get()?))?;
 
     Ok(pool)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::storage_major;
+
+    #[test]
+    fn storage_major_reads_the_leading_version() {
+        assert_eq!(storage_major("v1.5.0+"), Some(1));
+        assert_eq!(storage_major("v2.0.0+"), Some(2));
+        assert_eq!(storage_major("v2.1.0+"), Some(2));
+        assert_eq!(storage_major("v3.0.0+"), Some(3));
+    }
+
+    #[test]
+    fn storage_major_rejects_malformed_versions() {
+        for version in ["", "2.0.0+", "v", "vx.y.z", " v2.0.0+", "v-2.0.0"] {
+            assert_eq!(storage_major(version), None, "{version:?}");
+        }
+    }
 }
