@@ -18,6 +18,7 @@ import { SelectMetrics } from "./metric";
 import { ProjectHeader } from "./project-header";
 import { PropertiesCard } from "./properties";
 import { SelectRange } from "./range";
+import { parseReportFilters, serializeReportFilters } from "./report-filters";
 
 const Worldmap = lazy(() => import("./worldmap").then((module) => ({ default: module.Worldmap })));
 export type ProjectQuery = {
@@ -63,8 +64,21 @@ export const Project = () => {
 	const [projectId] = useState(() =>
 		typeof window === "undefined" ? undefined : window.location.pathname.split("/").pop(),
 	);
-	const [filters, setFilters] = useState<DimensionFilter[]>([]);
+	const [filters, setFilters] = useState<DimensionFilter[]>(() =>
+		typeof window === "undefined" ? [] : parseReportFilters(window.location.search),
+	);
 	const [eventName, setEventName] = useState("pageview");
+
+	// Keep the URL's filters in sync with the report, without adding history
+	// entries, so a link opened with filters survives a refresh and removing a
+	// filter does not leave a stale parameter behind.
+	useEffect(() => {
+		const url = new URL(window.location.href);
+		const serialized = serializeReportFilters(filters);
+		if (serialized) url.searchParams.set("filters", serialized);
+		else url.searchParams.delete("filters");
+		window.history.replaceState(window.history.state, "", url);
+	}, [filters]);
 
 	const { metric, setMetric } = useMetric();
 	const { range, setRange, interval: graphInterval, setInterval: setGraphInterval } = useRange();
