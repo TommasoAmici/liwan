@@ -89,7 +89,7 @@ those costs without changing stored events, report results, or any wire format.
       simpler and measurably faster, that is allowed, but do not fold the
       count into `execute` rows without a test.
 
-- [ ] Remove the per-request write from API-key authentication. In
+- [x] Remove the per-request write from API-key authentication. In
       `crates/liwan/src/app/core/api_keys.rs:188`, `authenticate` updates
       `last_used_at` on every ingestion request; SQLite has one writer, so a
       busy batch client serializes on it. Replace the unconditional update with
@@ -342,7 +342,11 @@ same pageview; the only consumer is a debug log. `update_event_exit` is gone;
 `exit_updates_only_the_latest_event_without_a_next_event` now calls
 `update_exits` and asserts one match.
 
-**Slices (2026-11-15).**
+**Slice 4 notes: API key last use.** `authenticate` now runs the timestamp
+update only when the stored value is null or older than 60 seconds. The
+dashboard can show a `last_used_at` up to a minute old;
+`last_used_at_is_written_at_most_once_a_minute` pins both the no-write window
+and the write after it. No other part of `authenticate` changed.
 
 **Decisions (2026-11-15, user answers).**
 

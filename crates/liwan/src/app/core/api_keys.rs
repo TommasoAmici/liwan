@@ -185,7 +185,14 @@ impl LiwanApiKeys {
                 permitted_entities.insert(row?);
             }
         }
-        conn.execute("update api_keys set last_used_at = ? where id = ?", rusqlite::params![Utc::now(), id])?;
+        // A busy ingestion client must not write to SQLite on every request;
+        // the stored timestamp is a "last seen" hint and one minute of lag is
+        // enough for the dashboard.
+        let now = Utc::now();
+        conn.execute(
+            "update api_keys set last_used_at = ? where id = ? and (last_used_at is null or last_used_at < ?)",
+            rusqlite::params![now, &id, now - chrono::Duration::seconds(60)],
+        )?;
         Ok(Some(ApiKeyAccess {
             id,
             access: Access {
@@ -458,5 +465,41 @@ mod tests {
                 .access
                 .can_access_entity("docs", AccessPermission::EventsBatch)
         );
+    }
+
+    #[test]
+    fn last_used_at_is_written_at_most_once_a_minute() {
+        let app = Liwan::new_memory(Config::default()).unwrap();
+        app.entities.create(&Entity { id: "docs".into(), display_name: "Docs".into() }, &[]).unwrap();
+        let (key, plaintext) = app
+            .api_keys
+            .create(
+                "production",
+                &AccessScope::Selected(vec!["docs".into()]),
+                &AccessScope::Selected(vec![]),
+                &[AccessPermission::EventsBatch],
+                ApiKeyExpiration::Never,
+            )
+            .unwrap();
+
+        assert!(app.api_keys.authenticate(&plaintext).unwrap().is_some());
+        let first = app.api_keys.all().unwrap()[0].last_used_at.expect("last use was not recorded");
+
+        assert!(app.api_keys.authenticate(&plaintext).unwrap().is_some());
+        let second = app.api_keys.all().unwrap()[0].last_used_at.expect("last use was not recorded");
+        assert_eq!(second, first, "a request inside the window must not write again");
+
+        app.api_keys
+            .pool
+            .get()
+            .unwrap()
+            .execute(
+                "update api_keys set last_used_at = ? where id = ?",
+                rusqlite::params![chrono::Utc::now() - chrono::Duration::minutes(2), key.id],
+            )
+            .unwrap();
+        assert!(app.api_keys.authenticate(&plaintext).unwrap().is_some());
+        let third = app.api_keys.all().unwrap()[0].last_used_at.expect("last use was not recorded");
+        assert!(third > first, "a request after the window must update the timestamp");
     }
 }
