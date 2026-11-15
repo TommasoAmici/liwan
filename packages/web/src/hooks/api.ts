@@ -126,6 +126,57 @@ export const useUtmTagSummary = ({ projectId, range }: { projectId?: string; ran
 	return { summaries: data ?? [], isLoading: isFetching, error };
 };
 
+/** The saved funnels of a project, ordered by name. */
+export const useFunnels = (projectId?: string) => {
+	const { data, isLoading, error } = useQuery({
+		queryKey: ["funnels", projectId],
+		enabled: projectId !== undefined,
+		queryFn: () =>
+			api["/api/dashboard/project/{project_id}/funnels"].get({ params: { project_id: projectId as string } }).json(),
+	});
+	return { funnels: data?.funnels ?? [], isLoading, error };
+};
+
+const funnelError = (error: unknown) => {
+	const status = (error as { status?: number } | undefined)?.status;
+	const message = (error as { message?: string } | undefined)?.message;
+	return { status, message, hiddenEvents: status === 400 && message?.includes("Custom events are hidden") === true };
+};
+
+/** Cumulative visitor groups per step for one saved funnel and range. */
+export const useFunnelReport = ({
+	projectId,
+	funnelId,
+	range,
+	filters,
+}: {
+	projectId?: string;
+	funnelId?: string;
+	range: DateRange;
+	filters: DimensionFilter[];
+}) => {
+	const { data, isFetching, error } = useQuery({
+		queryKey: ["funnel_report", projectId, funnelId, range.cacheKey(), filters],
+		enabled: projectId !== undefined && funnelId !== undefined,
+		// Keep the rows while the range or filters change, never across funnels.
+		placeholderData: (previous, previousQuery) =>
+			previousQuery?.queryKey[1] === projectId && previousQuery?.queryKey[2] === funnelId ? previous : undefined,
+		refetchInterval: range.endsToday() ? 60_000 : undefined,
+		queryFn: () =>
+			api["/api/dashboard/project/{project_id}/funnels/{funnel_id}/report"]
+				.post({
+					params: { project_id: projectId ?? "", funnel_id: funnelId ?? "" },
+					json: { ranges: [range.toAPI()], filters },
+				})
+				.json()
+				.then((result) => {
+					if (typeof result === "string") return Promise.reject(new Error(result));
+					return result.reports[0];
+				}),
+	});
+	return { report: data, isLoading: isFetching, error, ...funnelError(error) };
+};
+
 export const useEntities = () => {
 	const { data, isLoading, error } = useQuery({
 		queryKey: ["entities"],
@@ -361,4 +412,10 @@ export const invalidateUtmTags = (projectId: string) =>
 	Promise.all([
 		queryClient.invalidateQueries({ queryKey: ["utm_tags", projectId] }),
 		queryClient.invalidateQueries({ queryKey: ["utm_tag_summary", projectId] }),
+	]);
+
+export const invalidateFunnels = (projectId: string) =>
+	Promise.all([
+		queryClient.invalidateQueries({ queryKey: ["funnels", projectId] }),
+		queryClient.invalidateQueries({ queryKey: ["funnel_report", projectId] }),
 	]);

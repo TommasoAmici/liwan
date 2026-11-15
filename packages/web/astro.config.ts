@@ -26,6 +26,7 @@ function setPrerender(): AstroIntegration {
 				if (
 					isDev &&
 					(route.component.endsWith("/pages/p/[...project].astro") ||
+						route.component.endsWith("/pages/p/[project]/funnels.astro") ||
 						route.component.endsWith("/pages/p/[project]/utm-tags.astro") ||
 						route.component.endsWith("/pages/settings/projects/[projectId].astro") ||
 						route.component.endsWith("/pages/settings/entities/[entityId].astro") ||

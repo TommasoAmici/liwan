@@ -3,12 +3,13 @@ import styles from "./project-nav.module.css";
 import { appPath } from "@/config";
 import { cls } from "@/utils";
 
-export type ProjectScreen = "overview" | "utm-tags";
+export type ProjectScreen = "overview" | "funnels" | "utm-tags";
 
-/** The shared project navigation row: Overview and UTM tags. */
+/** The shared project navigation row: Overview, Funnels, and UTM tags. */
 export const ProjectNav = ({ projectId, current }: { projectId: string; current: ProjectScreen }) => {
 	const links: { screen: ProjectScreen; label: string; href: string }[] = [
 		{ screen: "overview", label: "Overview", href: appPath(`/p/${projectId}`) },
+		{ screen: "funnels", label: "Funnels", href: appPath(`/p/${projectId}/funnels`) },
 		{ screen: "utm-tags", label: "UTM tags", href: appPath(`/p/${projectId}/utm-tags`) },
 	];
 

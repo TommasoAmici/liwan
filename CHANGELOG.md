@@ -33,6 +33,11 @@ Since this is not a library, this changelog focuses on the changes that are rele
   selected range, and open the report filtered to that tag. Administrators add,
   edit, and delete tags; anyone who can view the project sees them and their
   traffic.
+- Projects have a *Funnels* screen. Build a funnel from pages and custom events
+  and see how many visitor groups reached each step and where they dropped off
+  for the selected range and filters. Administrators define the funnels; anyone
+  who can view the project sees the results. Counts are visitor groups, which
+  reset once a day.
 
 ### Other
 
