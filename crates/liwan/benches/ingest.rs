@@ -178,17 +178,14 @@ fn bench_request_helpers(c: &mut Criterion) {
     )
     .expect("valid url");
 
-    // Warm the parsed user agent cache so the benchmark measures the hit path,
+    // Warm the classification cache so the benchmark measures the hit path,
     // which is what a busy server sees.
-    let _ = useragent::parse(USER_AGENT);
+    let _ = useragent::classify(USER_AGENT);
 
     let mut group = c.benchmark_group("ingest");
     configure_group(&mut group);
-    group.bench_function("parse_user_agent", |b| {
-        b.iter(|| std::hint::black_box(useragent::parse(std::hint::black_box(USER_AGENT))));
-    });
-    group.bench_function("crawler_check", |b| {
-        b.iter(|| std::hint::black_box(useragent::is_crawler_header(std::hint::black_box(USER_AGENT))));
+    group.bench_function("classify_user_agent", |b| {
+        b.iter(|| std::hint::black_box(useragent::classify(std::hint::black_box(USER_AGENT))));
     });
     group.bench_function("extract_utm", |b| {
         b.iter(|| std::hint::black_box(liwan::web::routes::event::extract_utm(std::hint::black_box(&tagged_url))));

@@ -100,7 +100,7 @@ those costs without changing stored events, report results, or any wire format.
       rest of `authenticate` as it is. Add a unit test that a second call inside
       the window does not change `last_used_at` and that a call after it does.
 
-- [ ] Parse and classify each user agent once. Today
+- [x] Parse and classify each user agent once. Today
       `crates/liwan/src/web/routes/event.rs:214` calls
       `useragent::is_crawler_header`, which allocates a lowercased copy and
       scans all 338 crawler tokens on every event, and then calls the cached
@@ -347,6 +347,17 @@ update only when the stored value is null or older than 60 seconds. The
 dashboard can show a `last_used_at` up to a minute old;
 `last_used_at_is_written_at_most_once_a_minute` pins both the no-write window
 and the write after it. No other part of `authenticate` changed.
+
+**Slice 5 notes: user agent.** `useragent::classify` returns
+`Option<UserAgent>` and caches the verdict and the parsed client in one
+`UAP_CACHE` entry; `parse` and `is_crawler_header` are private helpers now, and
+`web/routes/event.rs` calls `classify` once. Cached hit measured 54 ns, against
+the 51.9 ns parse hit plus the 51.8 ns crawler scan it replaces (about 2× for
+the pair, and an uncached crawler skips the parser entirely). The bench case
+`parse_user_agent` and `crawler_check` became one `classify_user_agent` case;
+the old names are gone on purpose because the production call changed.
+`classify_drops_crawlers_and_headless_browsers` and
+`classify_returns_the_same_verdict_when_cached` pin the dropping and caching.
 
 **Decisions (2026-11-15, user answers).**
 

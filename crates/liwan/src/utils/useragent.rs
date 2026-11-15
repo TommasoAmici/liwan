@@ -2,7 +2,7 @@ use quick_cache::sync::Cache;
 use std::{io::Cursor, sync::LazyLock};
 use ua_parser::Extractor;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UserAgent {
     pub device_family: Option<String>,
     pub os_family: Option<String>,
@@ -17,7 +17,22 @@ static PARSER: LazyLock<Extractor<'static>> = LazyLock::new(|| {
     ua_parser::Extractor::try_from(regexes).expect("valid data")
 });
 
-static UAP_CACHE: LazyLock<Cache<String, UserAgent>> = LazyLock::new(|| Cache::new(1024));
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Classification {
+    Crawler,
+    Client(UserAgent),
+}
+
+impl Classification {
+    fn client(self) -> Option<UserAgent> {
+        match self {
+            Self::Crawler => None,
+            Self::Client(client) => Some(client),
+        }
+    }
+}
+
+static UAP_CACHE: LazyLock<Cache<String, Classification>> = LazyLock::new(|| Cache::new(1024));
 static CRAWLER_TOKENS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
     include_str!("../../../../data/crawlers.txt")
         .lines()
@@ -26,22 +41,37 @@ static CRAWLER_TOKENS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
         .collect()
 });
 
-pub fn parse(header: &str) -> UserAgent {
-    if let Some(client) = UAP_CACHE.get(header) {
-        return client;
+/// Parse a user agent and screen crawlers and bots in one cached call.
+///
+/// `None` means the event should be dropped. The verdict and the parsed client
+/// share one cache entry, so a repeated header costs one lookup instead of a
+/// crawler scan plus a parser lookup.
+pub fn classify(header: &str) -> Option<UserAgent> {
+    if let Some(entry) = UAP_CACHE.get(header) {
+        return entry.client();
+    }
+
+    let entry = if is_crawler_header(header) {
+        Classification::Crawler
+    } else {
+        let client = parse(header);
+        if client.is_bot() { Classification::Crawler } else { Classification::Client(client) }
     };
+
+    UAP_CACHE.insert(header.to_string(), entry.clone());
+    entry.client()
+}
+
+fn parse(header: &str) -> UserAgent {
     let (ua, os, device) = PARSER.extract(header);
-    let uap = UserAgent {
+    UserAgent {
         device_family: device.map(|d| d.device.to_string()),
         os_family: os.map(|os| os.os.replace("Mac OS X", "macOS").replace("Other", "Unknown")),
         ua_family: ua.map(|ua| ua.family.to_string()),
-    };
-
-    UAP_CACHE.insert(header.to_string(), uap.clone());
-    uap
+    }
 }
 
-pub fn is_crawler_header(header: &str) -> bool {
+fn is_crawler_header(header: &str) -> bool {
     let header = header.to_ascii_lowercase();
     CRAWLER_TOKENS.iter().any(|crawler| header.contains(crawler))
 }
@@ -63,7 +93,7 @@ mod test {
     #[test]
     fn test_ua_parser() {
         let user_agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1";
-        let client = parse(user_agent);
+        let client = classify(user_agent).expect("a normal browser is not a crawler");
         assert_eq!(client.os_family, Some("iOS".into()), "Expected OS family to be iOS");
         assert_eq!(client.device_family, Some("iPhone".into()), "Expected device family to be iPhone");
         assert!(client.is_mobile(), "Expected device to be mobile");
@@ -93,5 +123,22 @@ mod test {
     fn crawler_header_ignores_normal_browsers() {
         let user_agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
         assert!(!is_crawler_header(user_agent));
+    }
+
+    #[test]
+    fn classify_drops_crawlers_and_headless_browsers() {
+        let applebot = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1 Applebot/0.1";
+        let headless = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/120.0.0.0 Safari/537.36";
+
+        assert_eq!(classify(applebot), None, "a crawler token must drop the header");
+        assert_eq!(classify(headless), None, "a parsed bot must drop the header");
+    }
+
+    #[test]
+    fn classify_returns_the_same_verdict_when_cached() {
+        let user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+        let first = classify(user_agent);
+        assert!(first.is_some());
+        assert_eq!(first, classify(user_agent));
     }
 }

@@ -210,17 +210,12 @@ pub(super) fn process_event(
         return Ok(None);
     }
 
-    let client = if let Some(user_agent) = event.user_agent.as_deref() {
-        if useragent::is_crawler_header(user_agent) {
-            return Ok(None);
-        }
-        let client = useragent::parse(user_agent);
-        if client.is_bot() {
-            return Ok(None);
-        }
-        Some(client)
-    } else {
-        None
+    let client = match event.user_agent.as_deref() {
+        Some(user_agent) => match useragent::classify(user_agent) {
+            Some(client) => Some(client),
+            None => return Ok(None),
+        },
+        None => None,
     };
 
     if is_exit
