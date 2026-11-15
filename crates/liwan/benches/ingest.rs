@@ -1,6 +1,5 @@
 use std::net::IpAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use chrono::Utc;
@@ -15,10 +14,6 @@ const ENTITY: &str = "bench-entity";
 const BATCH_SIZE: usize = 512;
 const USER_AGENT: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1";
 
-/// Distinguishes the visitor ids of one benchmark iteration from the next so
-/// their previous events do not accumulate under the same visitors.
-static BATCH: AtomicU64 = AtomicU64::new(0);
-
 fn configure_group(group: &mut BenchmarkGroup<'_, criterion::measurement::WallTime>) {
     group.warm_up_time(Duration::from_secs(2));
     group.measurement_time(Duration::from_secs(5));
@@ -32,6 +27,10 @@ fn live_app() -> Arc<Liwan> {
 /// One million pageviews for a single entity over the last 24 hours, grouped in
 /// ten-event sessions. The last event of each session has no next event, which
 /// stands for a browser session that has not ended yet.
+///
+/// The 512 visitors the writer benchmark appends for get three pageviews a few
+/// minutes before the batch, the last one without a next event, so every
+/// iteration has a previous event to fill.
 fn seed_day(app: &Liwan) {
     let conn = app.events_conn().expect("failed to get events connection");
     conn.execute(
@@ -44,34 +43,29 @@ fn seed_day(app: &Liwan) {
         duckdb::params![ENTITY],
     )
     .expect("failed to seed the benchmark day");
-}
 
-/// Give this iteration's visitors three pageviews in the last few minutes, the
-/// last one without a next event, so the batch has a previous event to fill.
-fn insert_priors(app: &Liwan, batch: u64) {
-    let conn = app.events_conn().expect("failed to get events connection");
     conn.execute(
         "insert into events (entity_id, visitor_group_id, event, created_at, path, time_from_last_event, time_to_next_event)
-         select ?1, ?2 || '-' || j, 'pageview', now()::timestamp - (3 - p) * interval '1 minute', '/before-batch',
+         select ?1, 'bench-visitor-' || j, 'pageview', now()::timestamp - (3 - p) * interval '1 minute', '/before-batch',
              case when p > 1 then interval '1 minute' else null end,
              case when p < 3 then interval '1 minute' else null end
          from range(512) t(j), range(1, 4) u(p)",
-        duckdb::params![ENTITY, format!("batch-{batch}")],
+        duckdb::params![ENTITY],
     )
-    .expect("failed to insert previous events");
+    .expect("failed to insert the previous events");
 }
 
-fn batch_events(batch: u64) -> Vec<Event> {
+fn batch_events(track_sessions: bool) -> Vec<Event> {
     let created_at = Utc::now();
     (0..BATCH_SIZE)
         .map(|visitor| Event {
             entity_id: ENTITY.to_string(),
-            visitor_group_id: format!("batch-{batch}-{visitor}"),
+            visitor_group_id: format!("bench-visitor-{visitor}"),
             event: "pageview".to_string(),
             created_at,
             fqdn: Some("example.com".to_string()),
             path: Some("/batch".to_string()),
-            track_sessions: true,
+            track_sessions,
             ..Default::default()
         })
         .collect()
@@ -87,9 +81,30 @@ fn bench_writer(c: &mut Criterion) {
     group.bench_function("writer", |b| {
         b.iter_batched(
             || {
-                let batch = BATCH.fetch_add(1, Ordering::Relaxed);
-                insert_priors(&app, batch);
-                batch_events(batch)
+                // Drop the previous iteration's batch so the last 30 minutes of
+                // events stays the same size every iteration; otherwise the
+                // window grows with the number of samples and the benchmark
+                // measures its own history.
+                app.events_conn()
+                    .expect("failed to get events connection")
+                    .execute("delete from events where path = '/batch'", [])
+                    .expect("failed to reset the previous batch");
+                batch_events(true)
+            },
+            |events| app.events.append(events.into_iter()).expect("failed to append the benchmark batch"),
+            BatchSize::SmallInput,
+        );
+    });
+    // The same append with the session update switched off, to show how much of
+    // the writer is the appender and how much is the interval query.
+    group.bench_function("writer_without_session_update", |b| {
+        b.iter_batched(
+            || {
+                app.events_conn()
+                    .expect("failed to get events connection")
+                    .execute("delete from events where path = '/batch'", [])
+                    .expect("failed to reset the previous batch");
+                batch_events(false)
             },
             |events| app.events.append(events.into_iter()).expect("failed to append the benchmark batch"),
             BatchSize::SmallInput,
@@ -101,8 +116,12 @@ fn bench_writer(c: &mut Criterion) {
     let total: u64 = conn.query_row("select count(*) from events", [], |row| row.get(0)).expect("count failed");
     assert!(total >= 1_000_000, "the benchmark lost its seed data: {total}");
     // A filtered run (for example `-- extract_utm`) skips the writer case, so
-    // only validate the appended batches when at least one was appended.
-    if BATCH.load(Ordering::Relaxed) > 0 {
+    // only validate the appended batch when one was appended.
+    let appended: u64 = conn
+        .query_row("select count(*) from events where path = '/batch'", [], |row| row.get(0))
+        .expect("batch count failed");
+    if appended > 0 {
+        assert_eq!(appended, BATCH_SIZE as u64, "a benchmark batch went missing");
         let filled: u64 = conn
             .query_row(
                 "select count(*) from events where path = '/before-batch' and time_to_next_event is not null",

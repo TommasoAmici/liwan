@@ -42,7 +42,7 @@ those costs without changing stored events, report results, or any wire format.
       can be compared. No allocations or I/O in the timed closure beyond the
       operation under test.
 
-- [ ] Make the session interval update batch-scoped in
+- [x] Make the session interval update batch-scoped in
       `crates/liwan/src/app/core/events.rs`. `append` collects
       `(entity_id, visitor_group_id, earliest created_at)` for the pageviews
       that have `track_sessions`, and `update_event_times` receives that list
@@ -275,6 +275,13 @@ visitors each have three previous pageviews in the last minutes:
 | Benchmark | Result |
 |---|---|
 | `ingest/writer` | 59.4 ms median (53.1–63.9) per 512 events, 8.6 Kelem/s |
+| `ingest/writer_without_session_update` | added in slice 2: 1.15 ms |
+
+The first writer setup grew the recent 30-minute window with every sample, so
+the 59.4 ms row above is not comparable across code changes. Slice 2 fixed the
+setup to delete the previous batch before each iteration and re-baselined the
+old code at **18.6 ms** (1.15 ms without the session update); the new writer
+measured **7.3 ms** on the same bench.
 | `ingest/parse_user_agent` (cache hit) | 51.9 ns |
 | `ingest/crawler_check` | 51.8 ns |
 | `ingest/extract_utm` (5 UTM values plus 2 aliases) | 691 ns |
@@ -292,6 +299,36 @@ public module, `utils::visitor_group_id` is re-exported, and
 `web::routes::event::{Utm, extract_utm}` are public. None of them change
 behaviour. `Liwan::new_memory` was already outside the debug-only impl block, so
 a bench profile can use it.
+
+**Slice 2 notes: batch-scoped session intervals.** `append` now collects the
+distinct `(entity_id, visitor_group_id)` pairs whose pageviews can change, plus
+the batch's earliest timestamp, and `update_event_times` looks back 30 minutes
+from that timestamp for those visitors only. Two query shapes:
+
+- up to 4096 pairs: `entity_id in (...)` and `visitor_group_id in (...)` with a
+  constant `created_at >= ? - interval '30 minutes'`, then the same `lag`/`lead`
+  window and rowid update;
+- larger appends (a bulk import or `cargo dev seed`): one scan of the batch's
+  entities from the earliest timestamp, so a 10M-event seed does not build a
+  values list of millions of visitors.
+
+Findings worth keeping:
+
+- A join against a `values` list of 512 pairs was planned as a nested loop and
+  scanned the whole entity history (22.6 ms per batch). `in (...)` lists with a
+  constant time bound planned better (7.3 ms), and adding the join column to the
+  time bound also defeated zone-map pruning (17.3 ms).
+- With the corrected steady-state bench: old writer 18.6 ms per 512-event batch,
+  new writer 7.3 ms, appender alone 1.15 ms. At 1M pageviews/day the scan is the
+  last 30 minutes instead of 24 hours; the remaining cost is the recent-window
+  scan plus rewriting the matched rows, not the session count of the whole day.
+- A gap longer than 30 minutes is now stored as null instead of a large
+  interval. Reports cannot tell the difference: the bounce-rate and average-time
+  SQL and the `url_entry`/`url_exit` filters all collapse "null" and "> 30
+  minutes". `a_gap_longer_than_a_session_leaves_intervals_null` pins it;
+  `large_batches_fall_back_to_the_entity_scan` covers the seed-shaped path.
+- `session_updates_identify_individual_rows` needed its direct call adapted to
+  the new argument; its assertions are unchanged.
 
 **Slices (2026-11-15).**
 

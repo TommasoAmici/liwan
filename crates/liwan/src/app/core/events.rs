@@ -103,7 +103,7 @@ impl LiwanEvents {
     pub fn append(&self, events: impl Iterator<Item = Event>) -> Result<()> {
         let conn = self.duckdb.get()?;
         let mut first_event_time = None;
-        let mut session_entities = Vec::new();
+        let mut session_visitors: ahash::HashSet<(String, String)> = ahash::HashSet::default();
         let mut custom_data = Vec::new();
         let mut appender = conn.appender("events").context("Failed to get DuckDB appender")?;
         for event in events {
@@ -111,12 +111,9 @@ impl LiwanEvents {
                 custom_data.push((event.entity_id.clone(), event.event != "pageview", !event.properties.is_empty()));
             }
             if event.track_sessions && event.event == "pageview" {
-                if first_event_time.is_none_or(|first_event_time| event.created_at < first_event_time) {
-                    first_event_time = Some(event.created_at);
-                }
-                if !session_entities.contains(&event.entity_id) {
-                    session_entities.push(event.entity_id.clone());
-                }
+                first_event_time =
+                    Some(first_event_time.map_or(event.created_at, |time: DateTime<Utc>| time.min(event.created_at)));
+                session_visitors.insert((event.entity_id.clone(), event.visitor_group_id.clone()));
             }
             appender.append_row(event_params![event]).context("Failed to append event to DuckDB")?;
         }
@@ -132,7 +129,7 @@ impl LiwanEvents {
         }
         drop(cache);
         if let Some(first_event_time) = first_event_time {
-            update_event_times(&conn, first_event_time, &session_entities)
+            update_event_times(&conn, first_event_time, &session_visitors)
                 .context("Failed to update event times in DuckDB")?;
         }
         Ok(())
@@ -354,9 +351,99 @@ fn update_event_exit(conn: &Connection, exit: &EventExit) -> DuckResult<bool> {
     Ok(updated > 0)
 }
 
-fn update_event_times(conn: &Connection, from_time: DateTime<Utc>, entities: &[String]) -> DuckResult<()> {
-    if entities.is_empty() {
+/// At or below this many changed visitors, the interval update touches only
+/// their rows. A larger append (a bulk import, or the development seed) uses
+/// one scan of the batch's entities and time span instead: a values list of
+/// millions of visitors would be larger and slower than the scan it replaces.
+const MAX_VISITOR_SCOPE: usize = 4096;
+
+/// Recompute the intervals around the pageviews a batch just appended.
+///
+/// Only a visitor's previous pageview and the new pageview can change, so the
+/// common path looks back a session's length from each changed visitor. A gap
+/// longer than that stays null, which every report already treats like a gap
+/// longer than 30 minutes (`SESSION_DURATION_SQL`).
+fn update_event_times(
+    conn: &Connection,
+    from_time: DateTime<Utc>,
+    changed: &ahash::HashSet<(String, String)>,
+) -> DuckResult<()> {
+    if changed.is_empty() {
         return Ok(());
+    }
+
+    if changed.len() <= MAX_VISITOR_SCOPE {
+        update_changed_visitors(conn, from_time, changed)
+    } else {
+        update_entity_events(conn, from_time, changed)
+    }
+}
+
+fn update_changed_visitors(
+    conn: &Connection,
+    from_time: DateTime<Utc>,
+    changed: &ahash::HashSet<(String, String)>,
+) -> DuckResult<()> {
+    let mut entities: Vec<&String> = Vec::new();
+    let mut visitors: Vec<&String> = Vec::new();
+    for (entity, visitor) in changed {
+        if !entities.contains(&entity) {
+            entities.push(entity);
+        }
+        visitors.push(visitor);
+    }
+
+    // `in (...)` lists rather than a join against a `values` relation: DuckDB
+    // planned the join as a nested loop over every row in the window, which
+    // cost more than the scan it was meant to narrow. Visitor ids already
+    // include the entity in their hash input, and both lists are filtered, so
+    // the result is the same.
+    let entity_vars = repeat_vars(entities.len());
+    let visitor_vars = repeat_vars(visitors.len());
+    // The time bound is a constant so DuckDB can prune by `created_at` before
+    // matching the visitors.
+    let sql = format!("--sql
+        with
+            filtered_events as (
+                select rowid, entity_id, visitor_group_id, created_at
+                from events
+                where event = 'pageview'
+                    and entity_id in ({entity_vars})
+                    and visitor_group_id in ({visitor_vars})
+                    and created_at >= ?::timestamp - interval '30 minutes'
+            ),
+            cte as (
+                select
+                    rowid,
+                    created_at - lag(created_at) over (partition by entity_id, visitor_group_id order by created_at, rowid) as time_from_last_event,
+                    lead(created_at) over (partition by entity_id, visitor_group_id order by created_at, rowid) - created_at as time_to_next_event
+                from filtered_events
+            )
+        update events
+            set
+                time_from_last_event = cte.time_from_last_event,
+                time_to_next_event = cte.time_to_next_event
+            from cte
+            where events.rowid = cte.rowid;
+    ");
+    let mut params = ParamVec::new();
+    params.extend(entities);
+    params.extend(visitors);
+    params.push(from_time);
+    conn.execute(&sql, duckdb::params_from_iter(params))?;
+    Ok(())
+}
+
+fn update_entity_events(
+    conn: &Connection,
+    from_time: DateTime<Utc>,
+    changed: &ahash::HashSet<(String, String)>,
+) -> DuckResult<()> {
+    let mut entities: Vec<&String> = Vec::new();
+    for (entity, _) in changed {
+        if !entities.contains(&entity) {
+            entities.push(entity);
+        }
     }
 
     let entity_vars = repeat_vars(entities.len());
@@ -365,11 +452,7 @@ fn update_event_times(conn: &Connection, from_time: DateTime<Utc>, entities: &[S
             filtered_events as (
                 select rowid, entity_id, visitor_group_id, created_at
                 from events
-                where event = 'pageview' and entity_id in ({entity_vars}) and (created_at >= ?::timestamp or visitor_group_id in (
-                    select visitor_group_id
-                    from events
-                    where event = 'pageview' and entity_id in ({entity_vars}) and created_at >= now()::timestamp - interval '24 hours' and created_at < ?::timestamp and time_to_next_event is null
-                ))
+                where event = 'pageview' and entity_id in ({entity_vars}) and created_at >= ?::timestamp - interval '30 minutes'
             ),
             cte as (
                 select
@@ -387,8 +470,6 @@ fn update_event_times(conn: &Connection, from_time: DateTime<Utc>, entities: &[S
     ");
 
     let mut params = ParamVec::new();
-    params.extend(entities);
-    params.push(from_time);
     params.extend(entities);
     params.push(from_time);
     conn.execute(&sql, duckdb::params_from_iter(params))?;
@@ -433,8 +514,12 @@ mod tests {
                     ('c', 'visitor', 'pageview', '2026-01-01 00:00:00')",
         )
         .unwrap();
-        let from = "2026-01-01T00:00:00Z".parse().unwrap();
-        update_event_times(&conn, from, &["a".into(), "b".into()]).unwrap();
+        let from: DateTime<Utc> = "2026-01-01T00:00:00Z".parse().unwrap();
+        let changed = [("a", "visitor"), ("b", "visitor")]
+            .into_iter()
+            .map(|(entity, visitor)| (entity.to_string(), visitor.to_string()))
+            .collect();
+        update_event_times(&conn, from, &changed).unwrap();
         let rows = conn
             .prepare("select epoch(time_from_last_event)::bigint, epoch(time_to_next_event)::bigint from events order by rowid")
             .unwrap()
@@ -548,6 +633,57 @@ mod tests {
         assert_eq!(rows[0].2, Some(chrono::Duration::seconds(120)));
         assert_eq!(rows[1], ("signup".into(), None, None));
         assert_eq!(rows[2].1, Some(chrono::Duration::seconds(120)));
+    }
+
+    #[test]
+    fn a_gap_longer_than_a_session_leaves_intervals_null() {
+        let app = Liwan::new_memory(Config::default()).unwrap();
+        let first = Utc::now() - chrono::Duration::minutes(50);
+        let second = first + chrono::Duration::minutes(45);
+        app.events.append(vec![event(first)].into_iter()).unwrap();
+        app.events.append(vec![event(second)].into_iter()).unwrap();
+
+        let conn = app.events_conn().unwrap();
+        let rows = conn
+            .prepare("select epoch(time_from_last_event)::bigint, epoch(time_to_next_event)::bigint from events order by created_at")
+            .unwrap()
+            .query_map([], |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)))
+            .unwrap()
+            .collect::<DuckResult<Vec<_>>>()
+            .unwrap();
+        // A gap wider than the 30-minute session window is left null, which the
+        // reports treat exactly like a gap longer than 30 minutes.
+        assert_eq!(rows, vec![(None, None), (None, None)]);
+    }
+
+    #[test]
+    fn large_batches_fall_back_to_the_entity_scan() {
+        let app = Liwan::new_memory(Config::default()).unwrap();
+        let start = Utc::now() - chrono::Duration::minutes(5);
+        let mut events = vec![event(start), event(start + chrono::Duration::seconds(60))];
+        for visitor in 0..MAX_VISITOR_SCOPE {
+            events.push(Event {
+                visitor_group_id: format!("bulk-{visitor}"),
+                created_at: start + chrono::Duration::seconds(1),
+                ..event(start)
+            });
+        }
+        assert!(events.len() > MAX_VISITOR_SCOPE);
+
+        app.events.append(events.into_iter()).unwrap();
+
+        let conn = app.events_conn().unwrap();
+        let rows = conn
+            .prepare(
+                "select epoch(time_from_last_event)::bigint, epoch(time_to_next_event)::bigint
+                 from events where visitor_group_id = 'visitor-1' order by created_at",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)))
+            .unwrap()
+            .collect::<DuckResult<Vec<_>>>()
+            .unwrap();
+        assert_eq!(rows, vec![(None, Some(60)), (Some(60), None)]);
     }
 
     #[test]
