@@ -124,7 +124,7 @@ those costs without changing stored events, report results, or any wire format.
       bytes. `utm_alias_priority` must pass unchanged; add a case where the
       alias appears before the canonical name and a URL with no query at all.
 
-- [ ] Remove the two remaining allocations on the per-event path, keeping the
+- [x] Remove the two remaining allocations on the per-event path, keeping the
       output byte-identical:
 
       - `hostname_allowed` (`crates/liwan/src/app/models.rs:500`) lowercases the
@@ -365,6 +365,15 @@ value wins regardless of position. The old helper is gone. Measured 450 ns,
 down from 691 ns. The stored value is still untrimmed and capped at 255 bytes,
 as before; `utm_canonical_name_wins_even_when_the_alias_comes_first` and
 `utm_values_ignore_empty_and_overlong_input` cover the ordering and the limits.
+
+**Slice 7 notes: allocations.** `hostname_allowed` returns before lowercasing
+when the allow-list is empty (15.3 ns → 0.5 ns; the matching case is unchanged
+at 18.2 ns). `visitor_group_id` and `visitor_group_id_cidr` format the IP into
+a 64-byte stack buffer instead of `to_string()` (313 ns → 299 ns; the hash
+dominates). The hash input is byte-identical: `format_ip_matches_display_for_both_families`,
+`visitor_group_ids_hash_the_display_form_of_the_ip`, and
+`masked_visitor_group_ids_hash_the_masked_address` pin it, so visitor groups do
+not split on deploy.
 
 **Decisions (2026-11-15, user answers).**
 

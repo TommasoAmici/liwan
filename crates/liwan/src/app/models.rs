@@ -498,16 +498,18 @@ pub fn normalize_allowed_hostname_pattern(pattern: &str) -> Result<Option<String
 }
 
 pub fn hostname_allowed(hostname: &str, allowed_hostnames: &[String]) -> bool {
+    if allowed_hostnames.is_empty() {
+        return true;
+    }
     let hostname = hostname.trim_end_matches('.').to_ascii_lowercase();
-    allowed_hostnames.is_empty()
-        || allowed_hostnames.iter().any(|pattern| {
-            if let Some(suffix) = pattern.strip_prefix("*.") {
-                return hostname.len() > suffix.len()
-                    && hostname.ends_with(suffix)
-                    && hostname.as_bytes().get(hostname.len() - suffix.len() - 1) == Some(&b'.');
-            }
-            hostname == *pattern
-        })
+    allowed_hostnames.iter().any(|pattern| {
+        if let Some(suffix) = pattern.strip_prefix("*.") {
+            return hostname.len() > suffix.len()
+                && hostname.ends_with(suffix)
+                && hostname.as_bytes().get(hostname.len() - suffix.len() - 1) == Some(&b'.');
+        }
+        hostname == *pattern
+    })
 }
 
 fn is_valid_hostname(hostname: &str) -> bool {

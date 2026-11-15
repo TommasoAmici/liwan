@@ -21,7 +21,9 @@ pub fn verify_password(password: &str, hash: &str) -> Result<()> {
 }
 
 pub fn visitor_group_id(ip: &IpAddr, user_agent: &str, daily_salt: &str, entity_id: &str) -> String {
-    hash_visitor_group(&[ip.to_string().as_bytes(), user_agent.as_bytes(), daily_salt.as_bytes(), entity_id.as_bytes()])
+    let mut buffer = [0u8; 64];
+    let ip = format_ip(*ip, &mut buffer);
+    hash_visitor_group(&[ip, user_agent.as_bytes(), daily_salt.as_bytes(), entity_id.as_bytes()])
 }
 
 pub fn visitor_group_id_cidr(
@@ -35,7 +37,19 @@ pub fn visitor_group_id_cidr(
         IpAddr::V4(ip) => IpAddr::V4(mask_ipv4(*ip, ipv4_prefix)),
         IpAddr::V6(ip) => IpAddr::V6(mask_ipv6(*ip, ipv6_prefix)),
     };
-    hash_visitor_group(&[masked_ip.to_string().as_bytes(), daily_salt.as_bytes(), entity_id.as_bytes()])
+    let mut buffer = [0u8; 64];
+    let ip = format_ip(masked_ip, &mut buffer);
+    hash_visitor_group(&[ip, daily_salt.as_bytes(), entity_id.as_bytes()])
+}
+
+/// Format an IP the way `Display` does, without the heap allocation. The hash
+/// input must stay byte-identical to the previous `to_string()` form.
+fn format_ip(ip: IpAddr, buffer: &mut [u8; 64]) -> &[u8] {
+    use std::io::Write;
+    let mut cursor = std::io::Cursor::new(&mut buffer[..]);
+    write!(cursor, "{ip}").expect("an IP address fits in 64 bytes");
+    let written = cursor.position() as usize;
+    &buffer[..written]
 }
 
 fn hash_visitor_group(parts: &[&[u8]]) -> String {
@@ -80,4 +94,38 @@ pub fn onboarding_token() -> String {
 
 pub fn db_name() -> String {
     Alphanumeric.sample_string(&mut rand::rng(), 16)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_ip_matches_display_for_both_families() {
+        for address in ["1.1.1.1", "255.255.255.255", "2001:db8::1", "::1", "::ffff:10.0.0.1"] {
+            let ip: IpAddr = address.parse().unwrap();
+            let mut buffer = [0u8; 64];
+            assert_eq!(format_ip(ip, &mut buffer), ip.to_string().as_bytes(), "{address}");
+        }
+    }
+
+    #[test]
+    fn visitor_group_ids_hash_the_display_form_of_the_ip() {
+        for address in ["203.0.113.10", "2001:db8::1"] {
+            let ip: IpAddr = address.parse().unwrap();
+            let expected = hash_visitor_group(&[ip.to_string().as_bytes(), b"user-agent", b"daily-salt", b"entity"]);
+            assert_eq!(
+                visitor_group_id(&ip, "user-agent", "daily-salt", "entity"),
+                expected,
+                "the hash input changed for {address}"
+            );
+        }
+    }
+
+    #[test]
+    fn masked_visitor_group_ids_hash_the_masked_address() {
+        let ip: IpAddr = "203.0.113.10".parse().unwrap();
+        let expected = hash_visitor_group(&[b"203.0.113.0", b"daily-salt", b"entity"]);
+        assert_eq!(visitor_group_id_cidr(&ip, 24, 56, "daily-salt", "entity"), expected);
+    }
 }
