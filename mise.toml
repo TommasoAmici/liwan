@@ -1,0 +1,31 @@
+# Tooling pinned so a clean checkout builds the same way here and in CI.
+# `rust` matches `rust-version` in Cargo.toml; `bun` matches `packageManager`
+# in package.json. Run `mise install` once, then `mise run <task>`.
+[tools]
+rust = "1.99.1"
+bun = "1.4.2"
+
+[tasks."web:build"]
+description = "Build the tracker script and the web dashboard"
+run = "bun run build"
+
+[tasks."web:test"]
+description = "Typecheck and test every TypeScript package"
+run = ["bun run typecheck", "bun test"]
+
+[tasks."rust:test"]
+description = "Test the Rust workspace, as CI does"
+run = "mkdir -p packages/web/dist && cargo test --all --all-features"
+
+[tasks."rust:lint"]
+description = "Clippy and rustfmt, as CI runs them"
+run = ["cargo clippy --all-features -- -W warnings", "cargo fmt --all -- --check"]
+
+[tasks."rust:build"]
+description = "Build the release binary with the dashboard embedded"
+depends = ["web:build"]
+run = "cargo build --release --all-features"
+
+[tasks.check]
+description = "Everything CI checks, in one pass, in dependency order"
+run = ["mise run web:build", "mise run rust:lint", "mise run rust:test", "mise run web:test"]
