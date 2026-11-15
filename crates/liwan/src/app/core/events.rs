@@ -256,8 +256,7 @@ impl LiwanEvents {
                     where events.rowid = latest.rowid;
             "
             );
-            matched += usize::try_from(tx.execute(&sql, duckdb::params_from_iter(params))?)
-                .context("exit update count is too large")?;
+            matched += tx.execute(&sql, duckdb::params_from_iter(params))?;
         }
         tx.commit().context("Failed to commit event exits")?;
         Ok(matched)
