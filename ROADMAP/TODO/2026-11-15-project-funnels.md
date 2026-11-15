@@ -31,6 +31,9 @@ overview, so the funnel is a report, not a separate configuration page.
   This is the next app migration after V8; it creates an empty table and an
   index and rewrites no event data. Do not add an events migration: a funnel
   reads the existing `events` table and adds no collected field.
+  [2026-11-15-utm-tags.md](2026-11-15-utm-tags.md) owns the following app
+  migration, `V10__utm_tags.sql`, even if it ships first; do not renumber this
+  plan to V10 or let that plan take V9.
 
   Add `Funnel`, `FunnelStep`, and `FunnelMatch` to
   `crates/liwan/src/app/models.rs`. A funnel is `{ id, project_id,
@@ -273,17 +276,18 @@ overview, so the funnel is a report, not a separate configuration page.
     `packages/web/astro.config.ts` so dev mode serves arbitrary project IDs.
     No `ROUTE_PLACEHOLDERS` change is needed: the existing `p/` mapping
     already turns `/p/<id>/funnels` into `p/project/funnels`.
-  - Add `getDashboardProjectId()` to `packages/web/src/config.ts` and use it in
-    `components/dashboard/project/index.tsx` instead of
-    `window.location.pathname.split("/").pop()`. The helper strips `basePath`
-    and handles `/p/<id>`, `/p/<id>/funnels`, and trailing slashes. Add a
-    `config.test.ts` for those paths, including a configured base path.
-  - Add a small project navigation row, shared by the overview and the Funnels
-    page, with links to Overview (`/p/<id>`) and Funnels
-    (`/p/<id>/funnels`). Use `appPath` for both, mark the current page with
-    `aria-current="page"`, and keep it visible on public projects for viewers
-    who are not signed in. Do not add navigation to the project list on the
-    home page.
+  - Use the `getDashboardProjectId()` helper and the `ProjectNav` row that
+    [2026-11-15-utm-tags.md](2026-11-15-utm-tags.md) owns; that plan also moves
+    `components/dashboard/project/index.tsx` onto the helper. Add only the
+    Funnels link to `ProjectNav` when this page ships. The shared row always
+    links to Overview (`/p/<id>`) and links to UTM tags (`/p/<id>/utm-tags`)
+    only when that screen exists; never link to a page that has not shipped.
+    It stays visible on public projects, uses `appPath`, and marks the current
+    page with `aria-current="page"`. Do not add navigation to the project list
+    on the home page. If the UTM plan has not shipped yet, create the same
+    helper and row from its spec (strip `basePath`, parse `/p/<id>` and ignore a
+    trailing screen segment, links to Overview and Funnels) rather than a second
+    implementation; the UTM plan still owns later changes to the shell.
   - Add types to `packages/web/src/constants.ts` from the generated
     `DashboardSpec` (`Funnel`, `FunnelStep`, `FunnelReport`), not hand-written
     duplicates. Add `useFunnels(projectId)` and `invalidateFunnels(projectId)`
@@ -369,6 +373,9 @@ overview, so the funnel is a report, not a separate configuration page.
   those headings and its own `### Other` bullet; this plan only adds the
   funnel bullet. This plan owns the Features paragraph in `README.md`; the
   DuckDB plan owns the separate `## Upgrading` section that now follows it.
+  [2026-11-15-utm-tags.md](2026-11-15-utm-tags.md) adds its own Features
+  paragraph and its own `### Features` bullet; keep both entries whichever plan
+  ships first, and never replace one with the other.
 
 ## Implementation context
 
@@ -402,7 +409,9 @@ overview, so the funnel is a report, not a separate configuration page.
 - No events migration and no new collected field. The funnel reads existing
   events. The app migration is V9 and only creates a table and an index; on an
   existing database with millions of events it is effectively free because
-  nothing is rewritten and no event table is scanned at migration time.
+  nothing is rewritten and no event table is scanned at migration time. The UTM
+  tags plan owns the following app migration, V10; the two are independent and
+  refinery applies whichever versions are present in order.
 - No change to `packages/api` or `crates/api`. The new routes are
   `/api/dashboard/...`; the public ingestion and read API and their wire
   formats are untouched.
@@ -450,8 +459,9 @@ overview, so the funnel is a report, not a separate configuration page.
 **Landmarks.**
 
 - `crates/liwan/src/migrations/app/V8__external_auth_teams.sql` is the latest
-  app migration; the new one is `V9__funnels.sql`. `crates/liwan/src/app/mod.rs`
-  embeds migrations and constructs every service in `from_pools`.
+  app migration on `main`; this plan owns `V9__funnels.sql` and the UTM tags
+  plan owns `V10__utm_tags.sql`. `crates/liwan/src/app/mod.rs` embeds migrations
+  and constructs every service in `from_pools`.
 - `crates/liwan/src/app/core/reports/shared.rs` has `range_events_sql`,
   `build_filter_clause` and `ParamVec`; `reports/custom_events.rs` is the best
   small example of a report that builds SQL from a range and filters.
@@ -464,8 +474,9 @@ overview, so the funnel is a report, not a separate configuration page.
   `p/<id>/funnels` path is already handled by the existing prefix mapping.
 - `packages/web/src/pages/p/[...project].astro` is the current project page.
   `packages/web/src/components/dashboard/project/index.tsx` resolves the
-  project ID from `window.location.pathname`; that must move to the shared
-  helper before adding a nested page.
+  project ID from `window.location.pathname`; the UTM plan moves that to
+  `getDashboardProjectId()`. This plan uses the helper for `/p/<id>/funnels` and
+  must not add a second parser.
 - `packages/web/src/api/dashboard.ts` is generated by
   `liwan dev generate-openapi`; edit handlers and schemas first, then regenerate
   and commit it. `constants.ts` derives API types from that spec.
@@ -480,7 +491,10 @@ overview, so the funnel is a report, not a separate configuration page.
   `Dialog` primitive. Do not make it a project-level delete.
 - `README.md` Features is the feature spec; the DuckDB plan already added the
   `## Upgrading` section after it. `CHANGELOG.md` already has `## [Unreleased]`
-  and `### Features` from the DuckDB work; append the funnel bullet there.
+  and `### Features` from the DuckDB work; append the funnel bullet there. The
+  UTM tags plan adds its own Features paragraph and its own bullet; keep both.
+  `ProjectNav` and `getDashboardProjectId()` are owned by the UTM plan; this
+  plan adds only the Funnels link and uses the helper.
 
 **How to prove it.**
 
@@ -488,8 +502,8 @@ overview, so the funnel is a report, not a separate configuration page.
   module.
 - `mise exec -- cargo test -p liwan --test dashboard` and `--test admin` cover
   access, validation, counts and the hidden-events rule.
-- `mise run web:test` covers the path helper tests, typechecks the generated
-  spec and runs the web tests.
+- `mise run web:test` typechecks the generated spec and runs the web tests,
+  including the shared path helper tests owned by the UTM plan.
 - `mise run web:build`, `mise run rust:lint`, and the full
   `mise run rust:test` are what CI runs; run them once before the handoff.
 - Performance: `mise exec -- cargo dev seed` then
@@ -513,11 +527,18 @@ funnel definitions because the project owns them.
 **Ownership and shared work.** This plan owns app migration V9, the funnel
 types in `models.rs`, the new `core/funnels.rs` and `reports/funnels.rs`, the
 funnel routes in `web/routes/dashboard.rs`, the `ProjectResponse` display field,
-the project Funnels page and navigation, the Features paragraph in `README.md`,
-and the funnel bullet in `CHANGELOG.md`. The shipped DuckDB plan
+the Funnels page, its Features paragraph in `README.md`, and its funnel bullet
+in `CHANGELOG.md`. The shipped DuckDB plan
 ([2026-11-15-duckdb-v2.md](../DONE/2026-11-15-duckdb-v2.md)) owns `app/db.rs`,
 `upgrade_db`, the README `## Upgrading` section, and the `### Other` changelog
 bullet. It already added the `## [Unreleased]` and `### Features` headings, so
-this plan appends one bullet under them and never adds a second heading. This
-plan claims V9 for the app database; no other open or shipped plan claims an
-app or events migration number.
+this plan appends one bullet under them and never adds a second heading.
+[2026-11-15-utm-tags.md](2026-11-15-utm-tags.md) owns app migration V10,
+`ProjectNav`, `getDashboardProjectId()`, the report `filters` URL parameter,
+the UTM screen, and its own README and changelog entries. This plan adds only
+the Funnels link to the shared navigation and uses the helper; it must not
+create a second nav, a second helper, or a second project-id refactor. The two
+plans also add entries to `constants.ts`, `hooks/api.ts`, `models.rs`,
+`app/mod.rs`, `LiwanProjects::delete`, `benches/reports.rs`,
+`astro.config.ts`, `README.md`, and `CHANGELOG.md`; those additions are
+additive and should be kept together.
