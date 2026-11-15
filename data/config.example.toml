@@ -52,6 +52,11 @@ listen = 9042  # The port to listen on (http)
 [duckdb]  # Database settings
 ## See https://liwan.dev/guides/duckdb for guidance
 # threads=2
+## The memory limit bounds the query buffer manager, not the largest report.
+## Large reports spill intermediate results into a temporary directory next to
+## the events database (liwan-events.duckdb.tmp) and need free disk space there.
+## Spilling is capped at 90% of the free disk space by default. A very small
+## limit can still make the heaviest reports fail.
 # memory_limit=2G
 
 [limits]  # Resource limits

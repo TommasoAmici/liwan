@@ -102,7 +102,7 @@ DuckDB recommends for production.
       bullet; the existing one already describes the command. No config key, no
       `data/config.example.toml` entry, no API or wire change.
 
-- [ ] Prove and document that reports survive a small memory limit. On the
+- [x] Prove and document that reports survive a small memory limit. On the
       ten-million-event seed, start a report run with `[duckdb] memory_limit`
       set to `256MB` (then `128MB`) and execute the heaviest dashboard queries
       over a year: `overall_stats` for all metrics and a `dimension_report` on
@@ -387,6 +387,22 @@ with both sizes and the 7.1-million-event count, and then describes the
 read-back and the printed sizes. `CHANGELOG.md` gets one new `### Other` bullet;
 the existing Features bullet already describes the command. No config key, API
 or wire change, so nothing else moves.
+
+**Low memory (slice 4).** On the seeded 7,101,811-event database the year-long
+reports returned the same values with no limit and with
+`memory_limit = 256MB`, each well inside the default 30 s timeout:
+`overall_stats` 162 vs 157 ms, the overall views report 234 vs 255 ms, the path
+dimension 51 ms both, property keys 111 vs 112 ms, and the `theme` property
+dimension 90 vs 91 ms. At 256 MB DuckDB spilled up to 89,063,424 bytes
+(84.9 MiB) into `liwan-events.duckdb.tmp` beside the events file and removed it
+when the run ended. The only difference was the last digits of
+`avg_time_on_site` (2.355639903433288 vs 2.3556399034332824), a float
+summation-order effect.
+
+At `memory_limit = 128MB` `overall_stats` fails with `Out of Memory Error:
+could not allocate block of size 256.0 KiB (121.8 MiB/122.0 MiB used)`, so the
+comment in `data/config.example.toml` says a very small limit can still make
+the heaviest reports fail. No default changed and no config key was added.
 
 **Landmarks.**
 
