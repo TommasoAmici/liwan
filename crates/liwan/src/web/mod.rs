@@ -195,6 +195,7 @@ pub fn router(app: Arc<Liwan>, queues: EventQueues) -> Result<(axum::Router<()>,
         .merge(routes::auth::router(&app.config))
         .merge(routes::external_auth::router(&app.config))
         .merge(routes::dashboard::router())
+        .merge(routes::utm_tags::router())
         .layer(SetResponseHeaderLayer::if_not_present(header::CACHE_CONTROL, HeaderValue::from_static("private")));
     let state = RouterState {
         app: app.clone(),

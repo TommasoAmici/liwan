@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::task::spawn_blocking;
 
-async fn report_project(
+pub(super) async fn report_project(
     app: &RouterState,
     project_id: String,
     user: Option<User>,
@@ -35,7 +35,7 @@ async fn report_project(
     .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
 }
 
-async fn run_report<T, F>(app: &RouterState, report: F) -> ApiResult<T>
+pub(super) async fn run_report<T, F>(app: &RouterState, report: F) -> ApiResult<T>
 where
     T: Send + 'static,
     F: FnOnce(&DuckDBConn) -> anyhow::Result<T> + Send + 'static,
