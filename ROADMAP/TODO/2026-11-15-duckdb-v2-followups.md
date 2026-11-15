@@ -459,6 +459,15 @@ that evaluates to SQL NULL cannot be read as a String through this driver
 (`InvalidColumnType(..., Null)`), so a production read would have to coalesce
 or exclude NULLs explicitly.
 
+**DuckDB 2.0.1 (item 7, open).** crates.io had `1.20000.2` as the newest
+`duckdb` version on 2026-11-15 and no `1.20001.x` line, so the requirement in
+`crates/liwan/Cargo.toml` is unchanged and `cargo update` was not run. Do not
+pin a pre-release or a git revision. Resume when `1.20001.x` is published: bump
+the requirement to that line, run `cargo test -p liwan --lib` (the
+fresh-database test still asserts a `v2.` storage tag), the full
+`mise run rust:test` and `mise run rust:lint`, and both benches; re-run the
+storage measurement only if 2.0.1 changes compression or storage behavior.
+
 **Landmarks.**
 
 - `crates/liwan/src/cli.rs:50` `UpgradeDuckDb`, `:212` dispatch, `:255`
