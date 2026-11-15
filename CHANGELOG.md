@@ -26,6 +26,8 @@ Since this is not a library, this changelog focuses on the changes that are rele
   before running it; the original is kept beside the converted database with an
   `.old` suffix. The conversion is one-way, so a converted database does not
   open in a Liwan release that bundles the older engine.
+- Ingesting events no longer slows down as daily traffic grows. Recorded events
+  and reports are unchanged.
 
 ### Other
 

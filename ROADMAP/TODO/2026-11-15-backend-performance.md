@@ -231,7 +231,7 @@ those costs without changing stored events, report results, or any wire format.
       ranges measured 11–15 ms against 8–11 ms for one on 1M rows, so the fixed
       per-query cost dominates and the union-all is not the bottleneck.
 
-- [ ] Write the one changelog line this work earns. Under the existing
+- [x] Write the one changelog line this work earns. Under the existing
       `## [Unreleased]` / `### Features` in `CHANGELOG.md`, add a bullet that
       only the ingest slice is felt: events keep up under heavier traffic
       because the server no longer re-reads the last day of sessions on every
@@ -421,6 +421,12 @@ prune that deletes events drops the entity's `custom_data` entry
 (`retention_prune_invalidates_custom_data_cache`). Report results are unchanged:
 all `reports` tests and `--test dashboard` pass. `earliest_timestamp` and the
 per-range scans were left alone as the plan says.
+
+**Slice 12 notes: changelog.** One bullet under `## [Unreleased]` /
+`### Features`: "Ingesting events no longer slows down as daily traffic grows.
+Recorded events and reports are unchanged." No README, config example, or
+client change; no other slice earned a line because an operator cannot feel
+them.
 
 **Decisions (2026-11-15, user answers).**
 
