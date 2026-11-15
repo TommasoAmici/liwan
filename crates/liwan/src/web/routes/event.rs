@@ -87,19 +87,43 @@ pub struct Utm {
     term: Option<String>,
 }
 
-fn extract_query(url: &Url, keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| url.query_pairs().find(|(name, _)| name == *key).map(|(_, value)| value.into_owned()))
-        .filter(|value| !value.trim().is_empty() && value.len() <= 255)
+/// One query-string scan for every UTM value.
+///
+/// Canonical `utm_*` names win over the short aliases regardless of the order
+/// they appear in, so the aliases are applied in a second pass. A value must be
+/// non-empty after trimming and no longer than 255 bytes; the stored value is
+/// left exactly as the URL had it.
+pub fn extract_utm(url: &Url) -> Utm {
+    let pairs = url.query_pairs().collect::<Vec<_>>();
+    let mut utm = Utm::default();
+    for (name, value) in &pairs {
+        utm.set(name, value, false);
+    }
+    for (name, value) in &pairs {
+        utm.set(name, value, true);
+    }
+    utm
 }
 
-pub fn extract_utm(url: &Url) -> Utm {
-    Utm {
-        campaign: extract_query(url, &["utm_campaign", "campaign"]),
-        content: extract_query(url, &["utm_content", "content"]),
-        medium: extract_query(url, &["utm_medium", "medium"]),
-        source: extract_query(url, &["utm_source", "source", "ref", "referrer", "referer"]),
-        term: extract_query(url, &["utm_term", "term"]),
+fn clean_query_value(value: &str) -> Option<String> {
+    (!value.trim().is_empty() && value.len() <= 255).then(|| value.to_string())
+}
+
+impl Utm {
+    fn set(&mut self, name: &str, value: &str, alias: bool) {
+        let slot = match (name, alias) {
+            ("utm_source", false) | ("source", true) | ("ref", true) | ("referrer", true) | ("referer", true) => {
+                &mut self.source
+            }
+            ("utm_content", false) | ("content", true) => &mut self.content,
+            ("utm_medium", false) | ("medium", true) => &mut self.medium,
+            ("utm_campaign", false) | ("campaign", true) => &mut self.campaign,
+            ("utm_term", false) | ("term", true) => &mut self.term,
+            _ => return,
+        };
+        if slot.is_none() {
+            *slot = clean_query_value(value);
+        }
     }
 }
 
@@ -439,6 +463,31 @@ mod test {
         assert_eq!(utm.campaign.as_deref(), Some("spring"));
         assert_eq!(utm.content, None);
         assert_eq!(utm.term, None);
+    }
+
+    #[test]
+    fn utm_canonical_name_wins_even_when_the_alias_comes_first() {
+        let url =
+            Url::parse("https://example.com/path?source=ignored&utm_source=newsletter&ref=backup").expect("valid url");
+        assert_eq!(extract_utm(&url).source.as_deref(), Some("newsletter"));
+
+        let duplicates = Url::parse("https://example.com/path?utm_source=first&utm_source=second").expect("valid url");
+        assert_eq!(extract_utm(&duplicates).source.as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn utm_values_ignore_empty_and_overlong_input() {
+        let url = Url::parse("https://example.com/path?utm_source=%20&utm_medium=email").expect("valid url");
+        let utm = extract_utm(&url);
+        assert_eq!(utm.source, None);
+        assert_eq!(utm.medium.as_deref(), Some("email"));
+
+        let overlong =
+            Url::parse(&format!("https://example.com/path?utm_term={}", "a".repeat(256))).expect("valid url");
+        assert_eq!(extract_utm(&overlong).term, None);
+
+        let untagged = Url::parse("https://example.com/path").expect("valid url");
+        assert_eq!(extract_utm(&untagged), Utm::default());
     }
 
     #[test]

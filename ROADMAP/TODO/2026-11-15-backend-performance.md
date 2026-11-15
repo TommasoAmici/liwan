@@ -114,7 +114,7 @@ those costs without changing stored events, report results, or any wire format.
       `LazyLock`. Add tests for a normal browser, Applebot, a headless Chrome,
       and that two calls return the same verdict.
 
-- [ ] Parse the URL query string once per event. `extract_utm` and
+- [x] Parse the URL query string once per event. `extract_utm` and
       `extract_query` (`crates/liwan/src/web/routes/event.rs:90`) walk
       `url.query_pairs()` up to nine times (five dimensions and their aliases).
       Collect the pairs into a small `Vec<(Cow<str>, Cow<str>)>` once, then fill
@@ -358,6 +358,13 @@ the pair, and an uncached crawler skips the parser entirely). The bench case
 the old names are gone on purpose because the production call changed.
 `classify_drops_crawlers_and_headless_browsers` and
 `classify_returns_the_same_verdict_when_cached` pin the dropping and caching.
+
+**Slice 6 notes: UTM.** `extract_utm` collects `url.query_pairs()` once and
+applies canonical names in one pass and aliases in a second, so the canonical
+value wins regardless of position. The old helper is gone. Measured 450 ns,
+down from 691 ns. The stored value is still untrimmed and capped at 255 bytes,
+as before; `utm_canonical_name_wins_even_when_the_alias_comes_first` and
+`utm_values_ignore_empty_and_overlong_input` cover the ordering and the limits.
 
 **Decisions (2026-11-15, user answers).**
 
