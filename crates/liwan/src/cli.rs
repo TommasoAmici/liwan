@@ -212,8 +212,19 @@ pub fn handle_command(mut config: Config, cmd: Command) -> Result<()> {
         Command::UpgradeDuckDb(upgrade) => {
             let path =
                 upgrade.path.unwrap_or_else(|| std::path::Path::new(&config.data_dir).join("liwan-events.duckdb"));
+            let original_size = std::fs::metadata(&path).ok().map(|metadata| metadata.len());
             let backup = upgrade_db(&path)?;
-            println!("Upgraded {} (old file saved to {})", path.display(), backup.display());
+            let upgraded_size = std::fs::metadata(&path).ok().map(|metadata| metadata.len());
+            match (original_size, upgraded_size) {
+                (Some(original_size), Some(upgraded_size)) => println!(
+                    "Upgraded {} ({} -> {}; old file saved to {})",
+                    path.display(),
+                    format_size(original_size),
+                    format_size(upgraded_size),
+                    backup.display()
+                ),
+                _ => println!("Upgraded {} (old file saved to {})", path.display(), backup.display()),
+            }
         }
         #[cfg(debug_assertions)]
         Command::Dev(dev) => match dev.cmd {
@@ -308,6 +319,8 @@ fn upgrade_db(path: &std::path::Path) -> Result<std::path::PathBuf> {
                 upgraded.display()
             );
         }
+
+        compare_copies(&conn, "liwan_source", "liwan_upgraded", &source_tables, &upgraded)?;
     }
 
     std::fs::rename(path, &backup).context("Failed to save original database as .old")?;
@@ -318,11 +331,79 @@ fn upgrade_db(path: &std::path::Path) -> Result<std::path::PathBuf> {
     Ok(backup)
 }
 
+/// Read every row of every table back from the converted copy and compare it
+/// with the original in both directions.
+///
+/// The copy is a manual, one-off operation, so an exact set comparison is
+/// affordable here and is the only check that proves a data page survived.
+fn compare_copies(
+    conn: &duckdb::Connection,
+    source: &str,
+    upgraded: &str,
+    tables: &[String],
+    upgraded_path: &std::path::Path,
+) -> Result<()> {
+    for table in tables {
+        // Table names come from the catalog, so quote them as identifiers.
+        let quoted = format!("\"{}\"", table.replace('"', "\"\""));
+        let count = |database: &str| -> Result<i64> {
+            Ok(conn.query_row(&format!("SELECT count(*) FROM {database}.{quoted}"), [], |row| row.get(0))?)
+        };
+        let source_rows = count(source)?;
+        let upgraded_rows = count(upgraded)?;
+        if source_rows != upgraded_rows {
+            bail!(
+                "The copy in {} has {upgraded_rows} rows in table {table} but the original has {source_rows}; \
+                 the original was not changed. The partial copy is left for inspection",
+                upgraded_path.display()
+            );
+        }
+
+        let differences: i64 = conn.query_row(
+            &format!(
+                "SELECT
+                    (SELECT count(*) FROM (SELECT * FROM {source}.{quoted}
+                        EXCEPT ALL SELECT * FROM {upgraded}.{quoted}))
+                  + (SELECT count(*) FROM (SELECT * FROM {upgraded}.{quoted}
+                        EXCEPT ALL SELECT * FROM {source}.{quoted}))"
+            ),
+            [],
+            |row| row.get(0),
+        )?;
+        if differences != 0 {
+            bail!(
+                "The copy in {} has {differences} rows in table {table} that differ from the original; \
+                 the original was not changed. The partial copy is left for inspection",
+                upgraded_path.display()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Format a byte count with a binary unit and at most one decimal.
+fn format_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    match unit {
+        0 => format!("{bytes} B"),
+        _ if value >= 100.0 => format!("{value:.0} {}", UNITS[unit]),
+        _ => format!("{value:.1} {}", UNITS[unit]),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Args, Command, UpgradeDuckDb, handle_command, upgrade_db};
+    use super::{Args, Command, UpgradeDuckDb, compare_copies, format_size, handle_command, upgrade_db};
     use argh::FromArgs;
     use duckdb::Connection;
+    use std::path::Path;
 
     #[test]
     fn upgrade_command_accepts_optional_path() {
@@ -358,7 +439,9 @@ mod tests {
             let conn = Connection::open_with_flags(&path, flags).unwrap();
             conn.execute_batch(
                 "CREATE TABLE events (id INTEGER PRIMARY KEY, properties MAP(VARCHAR, VARCHAR));
-                 INSERT INTO events VALUES (42, MAP(['plan'], ['pro']));
+                 INSERT INTO events VALUES
+                    (42, MAP(['plan'], ['pro'])),
+                    (43, MAP(['plan', 'ref'], ['free', 'newsletter']));
                  CREATE TABLE migrations (version INTEGER, name VARCHAR, applied_on TIMESTAMP);
                  CHECKPOINT",
             )
@@ -370,12 +453,19 @@ mod tests {
         let original = Connection::open(&backup).unwrap();
         let upgraded = Connection::open(&path).unwrap();
         for conn in [&original, &upgraded] {
-            let id: i32 = conn.query_row("SELECT id FROM events", [], |row| row.get(0)).unwrap();
-            assert_eq!(id, 42);
-            let plan: String = conn
-                .query_row("SELECT map_extract_value(properties, 'plan') FROM events", [], |row| row.get(0))
+            let rows = conn
+                .prepare(
+                    "SELECT id, map_extract_value(properties, 'plan'), properties::varchar FROM events ORDER BY id",
+                )
+                .unwrap()
+                .query_map([], |row| Ok((row.get::<_, i32>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+                .unwrap()
+                .collect::<duckdb::Result<Vec<_>>>()
                 .unwrap();
-            assert_eq!(plan, "pro");
+            assert_eq!(rows.len(), 2);
+            assert_eq!(rows[0].0, 42);
+            assert_eq!(rows[0].1, "pro");
+            assert_eq!(rows[1], (43, "free".to_string(), "{plan=free, ref=newsletter}".to_string()));
         }
         let version = |conn: &Connection| -> String {
             conn.query_row(
@@ -425,5 +515,63 @@ mod tests {
         assert!(upgrade_db(&path).unwrap_err().to_string().contains("WAL file"));
         assert!(path.exists());
         assert!(!dir.path().join("events.duckdb.old").exists());
+    }
+
+    /// Two attached in-memory databases with one `events` table each, so the
+    /// comparison helper runs the same SQL shape as the real upgrade.
+    fn attached_copies(source_rows: &str, upgraded_rows: &str) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&format!(
+            "ATTACH ':memory:' AS liwan_source;
+             ATTACH ':memory:' AS liwan_upgraded;
+             CREATE TABLE liwan_source.events (id INTEGER, properties MAP(VARCHAR, VARCHAR));
+             CREATE TABLE liwan_upgraded.events (id INTEGER, properties MAP(VARCHAR, VARCHAR));
+             INSERT INTO liwan_source.events VALUES {source_rows};
+             INSERT INTO liwan_upgraded.events VALUES {upgraded_rows};"
+        ))
+        .unwrap();
+        conn
+    }
+
+    fn compare_attached(conn: &Connection) -> anyhow::Result<()> {
+        compare_copies(
+            conn,
+            "liwan_source",
+            "liwan_upgraded",
+            &["events".to_string()],
+            Path::new("events.duckdb.upgrade"),
+        )
+    }
+
+    #[test]
+    fn copy_comparison_accepts_identical_rows() {
+        let conn = attached_copies("(1, MAP(['plan'], ['pro'])), (2, NULL)", "(1, MAP(['plan'], ['pro'])), (2, NULL)");
+        compare_attached(&conn).unwrap();
+    }
+
+    #[test]
+    fn copy_comparison_rejects_a_missing_row() {
+        let conn = attached_copies("(1, NULL), (2, NULL)", "(1, NULL)");
+        let error = compare_attached(&conn).unwrap_err().to_string();
+        assert!(error.contains("table events"), "{error}");
+        assert!(error.contains("1 rows") && error.contains("2"), "{error}");
+        assert!(error.contains("events.duckdb.upgrade"), "{error}");
+    }
+
+    #[test]
+    fn copy_comparison_rejects_a_changed_map_value() {
+        let conn = attached_copies("(1, MAP(['plan'], ['pro'])), (2, NULL)", "(1, MAP(['plan'], ['free'])), (2, NULL)");
+        let error = compare_attached(&conn).unwrap_err().to_string();
+        assert!(error.contains("table events"), "{error}");
+        assert!(error.contains("2 rows"), "{error}");
+    }
+
+    #[test]
+    fn sizes_use_binary_units() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(512), "512 B");
+        assert_eq!(format_size(1024), "1.0 KiB");
+        assert_eq!(format_size(817_889_280), "780 MiB");
+        assert_eq!(format_size(1_288_490_188), "1.2 GiB");
     }
 }

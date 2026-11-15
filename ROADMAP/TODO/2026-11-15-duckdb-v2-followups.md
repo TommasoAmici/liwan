@@ -49,7 +49,7 @@ DuckDB recommends for production.
       the numbers for item 3 and recommend the conversion there. If not, say so
       plainly and skip the recommendation. Do not claim a win without a number.
 
-- [ ] Make `upgrade_db` read the copy back and report the size change. In
+- [x] Make `upgrade_db` read the copy back and report the size change. In
       `crates/liwan/src/cli.rs`, inside the attached block after the existing
       storage-version and table-name checks, compare the rows of every table
       listed by `duckdb_tables()` between `liwan_source` and `liwan_upgraded`
@@ -351,6 +351,35 @@ of the file. The literal seed-then-upgrade run is different in kind: a fresh
 seed file is an uncompact v2 file (592,195,584 B with 860 free blocks), and
 `upgrade-duckdb` rewrote it to 355,479,552 B in 101.06 s. That is compaction of
 free space, not a property of the new format; do not present it as a v2 win.
+
+**Verified copy (slice 2).**
+
+`upgrade_db` calls `compare_copies` after the storage-version and table-name
+checks and before any rename. Per table it compares `count(*)`, then reads
+`SELECT * FROM source.<table> EXCEPT ALL SELECT * FROM upgraded.<table>` in both
+directions and sums the differing rows. A mismatch `bail!`s with the `.upgrade`
+path, the table name and the counts, leaves the partial copy in place for
+inspection, and never touches the original; the existing refusals (symlink,
+non-file, WAL, existing `.old` or `.upgrade`) are unchanged. Table names come
+from `duckdb_tables()`, so only they are interpolated, and as double-quoted
+identifiers with doubled quotes.
+
+DuckDB 2.0 compares `MAP(VARCHAR, VARCHAR)` in `EXCEPT ALL`, so no
+`properties::varchar` fallback is needed. `copy_comparison_rejects_a_changed_map_value`
+pins it; a changed map value produces two differing rows, one per direction.
+The happy path is still `upgrades_database_and_keeps_backup`, which now writes
+two map rows (one with two keys) and reads both back from the backup and the
+converted file.
+
+`handle_command` prints
+`Upgraded <path> (565 MiB -> 339 MiB; old file saved to <path>.old)` from
+`std::fs::metadata` and a local `format_size` (binary units, one decimal, whole
+numbers at 100 and above). When metadata fails it keeps the old message instead
+of failing a conversion that succeeded.
+
+Cost on the ten-million-event seed: 99.13 s for the command, about 2.0 s of
+`COPY FROM DATABASE` and the rest the read-back. That is the accepted price of
+proving the copy; nothing here runs at startup or per report.
 
 **Landmarks.**
 
