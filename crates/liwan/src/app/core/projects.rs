@@ -122,6 +122,32 @@ impl LiwanProjects {
         Ok(project.clone())
     }
 
+    /// Replace the stored order; the list must name every project exactly once
+    pub fn reorder(&self, project_ids: &[String]) -> Result<()> {
+        let mut conn = self.pool.get()?;
+        let tx = conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached("select id from projects")?;
+            let known: std::collections::HashSet<String> =
+                stmt.query_map([], |row| row.get("id"))?.collect::<Result<_, _>>()?;
+            let listed: std::collections::HashSet<&str> = project_ids.iter().map(String::as_str).collect();
+            if listed.len() != project_ids.len()
+                || listed.len() != known.len()
+                || !project_ids.iter().all(|id| known.contains(id))
+            {
+                bail!("project order must list every project exactly once");
+            }
+        }
+        {
+            let mut update = tx.prepare_cached("update projects set sort_order = ? where id = ?")?;
+            for (position, id) in project_ids.iter().enumerate() {
+                update.execute(rusqlite::params![position as i64, id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Update a project
     pub fn update(&self, project: &models::Project) -> Result<models::Project> {
         let conn = self.pool.get()?;
@@ -226,5 +252,28 @@ mod tests {
             )
             .unwrap();
         assert_eq!(listed(&app), ["c", "a", "b", "d"]);
+    }
+
+    #[test]
+    fn reorder_changes_the_listed_order() {
+        let app = app_with_projects(&["a", "b", "c"]);
+        app.projects.reorder(&["c".into(), "a".into(), "b".into()]).unwrap();
+        assert_eq!(listed(&app), ["c", "a", "b"]);
+    }
+
+    #[test]
+    fn reorder_rejects_lists_that_do_not_name_every_project() {
+        let app = app_with_projects(&["a", "b", "c"]);
+        app.projects.reorder(&["c".into(), "a".into(), "b".into()]).unwrap();
+        let incomplete = [
+            vec!["c".into(), "a".into()],
+            vec!["c".into(), "a".into(), "b".into(), "d".into()],
+            vec!["c".into(), "a".into(), "a".into()],
+            Vec::new(),
+        ];
+        for project_ids in incomplete {
+            assert!(app.projects.reorder(&project_ids).is_err(), "{project_ids:?}");
+            assert_eq!(listed(&app), ["c", "a", "b"], "order changed by {project_ids:?}");
+        }
     }
 }

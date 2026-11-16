@@ -53,7 +53,7 @@ project list follow it.
   That is the proof the backfill preserves the old order without running the
   whole app.
 
-- [ ] Add the store method that writes an order. In `projects.rs`, add
+- [x] Add the store method that writes an order. In `projects.rs`, add
       `pub fn reorder(&self, project_ids: &[String]) -> Result<()>` that runs in
       one transaction and writes `sort_order = index` for each ID. It must
       accept exactly the current set of projects: reject an unknown ID, a
@@ -183,6 +183,15 @@ project list follow it.
   `app::db::tests::project_order_migration_preserves_the_existing_order` runs the
   migration SQL against a minimal old `projects` table, without the full
   migration runner.
+- `LiwanProjects::reorder` compares the submitted IDs with the stored set before
+  writing anything: a shorter or longer list, an unknown ID or a repeated ID is
+  rejected as `project order must list every project exactly once`, and the
+  stored order stays as it was. A valid list writes `sort_order = index` for
+  every project in one transaction. Deleting a project can leave a gap; it needs
+  no renumbering because `create` appends past the maximum.
+- Tests: `reorder_changes_the_listed_order` and
+  `reorder_rejects_lists_that_do_not_name_every_project` (missing, extra,
+  duplicate and empty lists, each asserting the order is untouched).
 
 **Landmarks.**
 
