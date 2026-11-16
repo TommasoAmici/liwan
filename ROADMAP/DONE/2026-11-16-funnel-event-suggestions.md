@@ -13,7 +13,7 @@ report query stay as they are.
 
 ## Checklist
 
-- [ ] Replace the event name text field with a suggestion combo box in
+- [x] Replace the event name text field with a suggestion combo box in
       `packages/web/src/components/dashboard/project/funnels/dialog.tsx`, using
       the same Base UI `Autocomplete` pattern as the page path field just above
       it:
@@ -69,7 +69,7 @@ report query stay as they are.
   - Do not change the create/update request, the server validation, or any
     other screen. The event field remains the only place that suggests events.
 
-- [ ] Document the visible change. Add one sentence to the **See where visitors
+- [x] Document the visible change. Add one sentence to the **See where visitors
       drop off** paragraph in `README.md` after the first sentence: "When you
       add a custom-event step, the editor suggests the events seen in the
       selected range, and you can still type a name that has not appeared
@@ -170,6 +170,32 @@ report query stay as they are.
     is converted or removed.
   - Check the open popup at 320 px and 1440 px in light and dark, with no
     horizontal page overflow, and confirm the browser console is clean.
+
+**Implementation (2026-11-16, this branch).**
+
+- `EventSuggestion` and the event `Autocomplete` mirror the page path field in
+  `dialog.tsx`. `useCustomEvents` is called with an empty `filters` array and
+  `enabled: !customEventsHidden`, and rows map to
+  `{ name, completions: row.completions ?? 0 }` without slicing.
+- The dialog reuses the existing `.path*` classes unchanged, so
+  `funnels.module.css` has no diff and there is no second set of styles. The
+  `path*` names stay as they are to keep the merge with the funnel sidebar work
+  small.
+- Popup states: `Autocomplete.Status` shows "Loading custom events…" while the
+  hook fetches, `Autocomplete.Empty` shows the hidden, error, or no-events text,
+  and a truncated report adds "Showing the top events only.".
+- The input keeps `required`, `maxLength={255}`, `placeholder="signup"`, and
+  `aria-label`. A `<label htmlFor>` and matching input `id` satisfy Biome's
+  `noLabelWithoutControl`, which does not see Base UI's `Input` inside a
+  wrapping label.
+- Validation: `mise run web:test` (typecheck and 67 bun tests) and
+  `mise run web:build` pass, and `biome check` is clean on `dialog.tsx`.
+- Limitation, unchanged on purpose: event matching stays case-sensitive on the
+  server, and a typed name that is not suggested saves exactly as typed.
+- The browser check (suggestions against the custom-events card, keyboard
+  selection, hidden-project states, 320 px and 1440 px in light and dark,
+  console and network log) was deferred to the integration branch, because this
+  worktree must not start a server.
 
 **Out of scope.**
 
