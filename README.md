@@ -28,7 +28,7 @@
 See your most-visited pages, where visitors come from, and how traffic changes over time. The dashboard updates in real time, with bot filtering enabled by default. Administrators can put the projects they follow first, and the home page follows that order.
 
 **See where visitors drop off**\
-Build funnels from pages and custom events and see how many visitor groups reach each step. Administrators define funnels per project, and anyone who can view the project sees the results for the selected date range and filters. Funnel counts are visitor groups, which reset once a day.
+Build funnels from pages and custom events and see how many visitor groups reach each step. Administrators define funnels per project, and anyone who can view the project sees the results for the selected date range and filters. Funnel counts are visitor groups, which reset once a day. Saved funnels sit in a sidebar beside the report, and on narrow screens you choose one from the Funnel menu.
 
 **Easy to self-host**\
 Run Liwan as a [single binary](https://liwan.dev/install/binary/) or [Docker container](https://liwan.dev/install/docker/). The dashboard and database are built in, with no additional services to manage.

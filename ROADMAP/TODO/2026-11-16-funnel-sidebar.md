@@ -13,7 +13,7 @@ navigation row (Overview, Funnels, UTM tags) stays where it is.
 
 ## Checklist
 
-- [ ] Restructure the screen in
+- [x] Restructure the screen in
       `packages/web/src/components/dashboard/project/funnels/index.tsx` and
       `funnels.module.css`:
 
@@ -63,7 +63,7 @@ navigation row (Overview, Funnels, UTM tags) stays where it is.
     Do not add a second mobile control, a drawer, or a JS breakpoint hook; the
     native select is the narrow layout.
 
-- [ ] Document the visible change. Add one sentence at the end of the
+- [x] Document the visible change. Add one sentence at the end of the
       **See where visitors drop off** paragraph in `README.md`: "Saved funnels
       sit in a sidebar beside the report, and on narrow screens you choose one
       from the Funnel menu." Append one `### Features` bullet under the existing
@@ -197,3 +197,21 @@ sidebar cannot fit at 320 px, so one labeled select is the reflow, not a second
 way to browse funnels. The rest of that plan, including the selection fallback
 and the editor, still applies. The UTM tags and project order plans do not touch
 this screen.
+
+**Implementation notes (2026-11-16).**
+
+- The workspace is `.workspace` (grid), `.funnelRail` (sticky column with the
+  admin `New funnel` button and `.funnelList`), and `.reportPane` (filters plus
+  the unchanged report card). The mobile picker is `.picker` / `.pickerRow`;
+  both it and the rail switch on `max-width: 52rem`, so only one `New funnel`
+  control is ever displayed.
+- The selected row uses `--surface-hover`, `--text-title`, weight 600, and a
+  2 px `--accent` left border, with the left edge squared so the bar reads as a
+  navigation marker rather than a pill. No token was added.
+- Landmark for the sibling plan: the dialog and `.path*` / suggestion rules
+  below the report styles were not touched.
+- Validation: `mise run web:test` (typecheck plus 67 bun tests) and
+  `mise run web:build` both pass. The browser pass (long names, rail overflow,
+  52 rem switch, 320/768/1024/1440 px, 200 % zoom, light and dark, focus rings,
+  delete fallback) is deferred to integration on the combined branch because
+  this worktree must not start a server.
