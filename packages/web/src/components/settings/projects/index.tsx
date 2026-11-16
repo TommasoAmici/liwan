@@ -3,6 +3,7 @@ import styles from "../settings.module.css";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Toggle } from "@base-ui/react/toggle";
 import { ToggleGroup } from "@base-ui/react/toggle-group";
+import { ArrowDownIcon, ArrowUpIcon } from "lucide-react";
 
 import { api } from "@/api";
 import { LoadingSpinner } from "@/components/ui/loading";
@@ -25,6 +26,7 @@ import {
 } from "../form";
 import type { Tag } from "../tags";
 import { Tags } from "../tags";
+import { moveProject } from "./order";
 
 export { CreateProject } from "./dialogs";
 
@@ -63,6 +65,23 @@ const projectTabs = [
 export const ProjectsTable = () => {
 	const { projects, isLoading } = useProjects();
 	const { role } = useMe();
+	const [saving, setSaving] = useState(false);
+
+	const saveOrder = async (index: number, direction: -1 | 1) => {
+		const projectIds = moveProject(projects, index, direction).map((project) => project.id);
+		setSaving(true);
+		try {
+			await api["/api/dashboard/projects/order"].put({ json: { projectIds } });
+		} catch {
+			createToast("Failed to update project order", "error");
+		} finally {
+			try {
+				await invalidateProjects();
+			} finally {
+				setSaving(false);
+			}
+		}
+	};
 
 	const columns: Column<(typeof projects)[number]>[] = [
 		{
@@ -103,6 +122,38 @@ export const ProjectsTable = () => {
 			render: (row) => (
 				<SettingsLink href={appPath(`/settings/projects/${row.id}`)} label={`Open ${row.displayName} settings`} />
 			),
+		});
+	}
+	if (role === "admin" && projects.length > 1) {
+		columns.unshift({
+			id: "order",
+			header: "Order",
+			nowrap: true,
+			render: (row) => {
+				const index = projects.findIndex((project) => project.id === row.id);
+				return (
+					<span className={styles.orderButtons}>
+						<button
+							type="button"
+							className="button-ghost"
+							aria-label={`Move ${row.displayName} up`}
+							disabled={saving || index === 0}
+							onClick={() => saveOrder(index, -1)}
+						>
+							<ArrowUpIcon size={16} />
+						</button>
+						<button
+							type="button"
+							className="button-ghost"
+							aria-label={`Move ${row.displayName} down`}
+							disabled={saving || index === projects.length - 1}
+							onClick={() => saveOrder(index, 1)}
+						>
+							<ArrowDownIcon size={16} />
+						</button>
+					</span>
+				);
+			},
 		});
 	}
 

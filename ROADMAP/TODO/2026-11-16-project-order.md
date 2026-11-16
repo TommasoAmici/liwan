@@ -94,7 +94,7 @@ project list follow it.
   repeating an ID each get 400 and leave the previous order in place; create a
   fourth project after reordering and assert it appears last.
 
-- [ ] Add the controls in Settings > Projects. In
+- [x] Add the controls in Settings > Projects. In
       `packages/web/src/components/settings/projects/index.tsx`, the existing
       `ProjectsTable` already knows `role`; when the viewer is an admin and
       there are at least two projects, add an `Order` column before `Name` with
@@ -212,6 +212,33 @@ project list follow it.
   duplicate and empty lists each get 400 and leave the order) and
   `project_order_appends_new_projects`. Run them with `cargo test -p liwan
   --test admin project_order`.
+
+**Settings > Projects controls (2026-11-16).**
+
+- `ProjectsTable` puts an `Order` column first, only for administrators and only
+  with two or more projects. The row index comes from `projects.findIndex`; up is
+  disabled on the first row and down on the last. Buttons use `button-ghost`,
+  `ArrowUpIcon`/`ArrowDownIcon` at 16, and `Move <name> up`/`down` labels.
+- A click sends the complete new ID order and does not reorder the table
+  optimistically. One `saving` flag disables every Order button from the request
+  until `invalidateProjects()` settles; it is cleared in a nested `finally` so a
+  failed refetch cannot leave the buttons disabled forever. A quick second click
+  therefore cannot build a request from the pre-move array. A failure toasts
+  `Failed to update project order` and the refetch resyncs the table; there is no
+  success toast.
+- `moveProject` in `packages/web/src/components/settings/projects/order.ts`
+  returns a new array, or the input unchanged when the index or target is out of
+  range. `order.test.ts` covers the first, middle, last and out-of-range cases.
+- `pages/settings/projects.astro` now says in the description that
+  administrators choose the home page order.
+- Manual check on the worktree server with three public projects: at 320 px and
+  1440 px, in light and dark themes, Settings > Projects shows the Order column
+  with the first up and last down disabled, and `Move Blog up` leaves the rows as
+  Docs, Blog, Marketing after the refetch. The home page shows the same order at
+  both widths and themes. A signed-in non-admin sees no Order column but the
+  same order. At 320 px the shared table scrolls horizontally as before; the
+  Order column itself is fully visible. The screenshots were local checks and are
+  not committed.
 
 **Landmarks.**
 
