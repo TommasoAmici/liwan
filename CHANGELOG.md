@@ -45,6 +45,7 @@ Since this is not a library, this changelog focuses on the changes that are rele
   and still accepts a name that has not appeared yet.
 - Saved funnels now sit in a sidebar beside the report on the *Funnels* screen.
   On narrow screens, choose the funnel from the *Funnel* menu.
+- The UTM tag editor now explains what each field is for.
 
 ### Other
 

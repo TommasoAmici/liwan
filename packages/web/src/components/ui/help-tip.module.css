@@ -1,0 +1,57 @@
+/* The tooltip portals outside the dialog, so it has to sit above the dialog's
+   z-index of 100 (dialog.module.css). */
+.positioner {
+  z-index: 110;
+  max-width: calc(100vw - 1rem);
+}
+
+.popup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-width: min(18rem, calc(100vw - 1rem));
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: var(--font-size-md);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  box-shadow: var(--shadow-card);
+}
+
+.heading {
+  font-weight: 600;
+}
+
+.description {
+  color: var(--text-muted);
+}
+
+.trigger {
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  min-height: 1.5rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  box-shadow: none;
+  cursor: help;
+  vertical-align: middle;
+}
+
+.trigger:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
