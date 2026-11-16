@@ -458,10 +458,6 @@
   outline: 0;
 }
 
-.pathPositioner[data-empty] {
-  display: none;
-}
-
 .pathPopup {
   width: var(--anchor-width);
   max-width: var(--available-width);
