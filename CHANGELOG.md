@@ -43,6 +43,8 @@ Since this is not a library, this changelog focuses on the changes that are rele
   project list, and existing installs keep the order they have today.
 - The funnel editor now suggests the custom events seen in the selected range,
   and still accepts a name that has not appeared yet.
+- Saved funnels now sit in a sidebar beside the report on the *Funnels* screen.
+  On narrow screens, choose the funnel from the *Funnel* menu.
 
 ### Other
 

@@ -57,9 +57,87 @@
   background: var(--surface);
 }
 
-.toolbar {
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.funnelRail {
+  position: sticky;
+  top: 1rem;
+  align-self: start;
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+  max-height: calc(100vh - 2rem);
+}
+
+.newFunnel {
+  flex: none;
+  width: 100%;
+}
+
+/* The list scrolls inside the rail, so the New funnel button stays put. */
+.funnelList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0.2rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+.reportPane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  min-width: 0;
+}
+
+/* Below 52rem the rail is hidden and this labeled select takes its place. */
+.picker {
+  display: none;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.pickerLabel {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.pickerRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pickerRow > select {
+  flex: 1 1 14rem;
+  width: auto;
+  min-width: 0;
+}
+
+@media (max-width: 52rem) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .funnelRail {
+    display: none;
+  }
+
+  .picker {
+    display: flex;
+  }
 }
 
 .empty {
@@ -84,20 +162,19 @@
   color: var(--text-muted);
 }
 
-/* The row wraps, so a long funnel name stretches the row instead of clipping. */
-.funnelRow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-
+/* A row reads as navigation: quiet until hovered, with a left bar when selected. */
 .funnelButton {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  background: var(--surface-raised);
-  border-color: var(--field-border);
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid transparent;
+  border-left: 2px solid transparent;
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background: transparent;
   color: var(--text);
+  font-weight: 500;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 
 .funnelButton:hover:not(:disabled) {
@@ -106,15 +183,16 @@
 }
 
 .funnelButton[aria-pressed="true"] {
-  background: var(--accent-fill);
-  border-color: var(--accent-fill);
-  color: var(--accent-contrast);
+  border-color: transparent;
+  border-left-color: var(--accent);
+  background: var(--surface-hover);
+  color: var(--text-title);
+  font-weight: 600;
 }
 
 .funnelButton[aria-pressed="true"]:hover:not(:disabled) {
-  background: var(--accent-fill-hover);
-  border-color: var(--accent-fill-hover);
-  color: var(--accent-contrast);
+  background: var(--surface-hover);
+  color: var(--text-title);
 }
 
 .reportHeader {

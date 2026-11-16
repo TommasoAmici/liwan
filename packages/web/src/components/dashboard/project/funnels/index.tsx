@@ -90,127 +90,159 @@ export const Funnels = () => {
 					{createButton}
 				</article>
 			) : (
-				<>
-					{isAdmin && <div className={styles.toolbar}>{createButton}</div>}
-					<div className={styles.funnelRow} role="group" aria-label="Saved funnels">
-						{funnels.map((funnel) => (
-							<button
-								key={funnel.id}
-								type="button"
-								className={styles.funnelButton}
-								aria-pressed={funnel.id === selected?.id}
-								onClick={() => setSelectedId(funnel.id)}
-							>
-								{funnel.displayName}
+				<div className={styles.workspace}>
+					<nav className={styles.funnelRail} aria-label="Saved funnels">
+						{isAdmin && (
+							<button type="button" className={styles.newFunnel} onClick={() => setEditor({ funnel: null })}>
+								New funnel
 							</button>
-						))}
-					</div>
-					<SelectFilters value={filters} onChange={setFilters} dimensions={filterDimensions} />
-					{selected && (
-						<article className={styles.card}>
-							<header className={styles.reportHeader}>
-								<div className={styles.reportTitle}>
-									<h2>{selected.displayName}</h2>
-									{!countsHidden && first > 0 && (
-										<p className={styles.completion}>
-											<strong>{formatPercent(completion)}</strong> of visitor groups completed all{" "}
-											{selected.steps.length} steps · {formatMetricVal(last, "views")} groups
-										</p>
-									)}
-									{report.isLoading && report.report && (
-										<span className={styles.updating} role="status" aria-label="Updating report">
-											<LoadingSpinner immediate />
-										</span>
-									)}
-								</div>
+						)}
+						<ul className={styles.funnelList}>
+							{funnels.map((funnel) => (
+								<li key={funnel.id}>
+									<button
+										type="button"
+										className={styles.funnelButton}
+										aria-pressed={funnel.id === selected?.id}
+										onClick={() => setSelectedId(funnel.id)}
+									>
+										{funnel.displayName}
+									</button>
+								</li>
+							))}
+						</ul>
+					</nav>
+					<div className={styles.reportPane}>
+						<div className={styles.picker}>
+							<label className={styles.pickerLabel} htmlFor="funnel-select">
+								Funnel
+							</label>
+							<div className={styles.pickerRow}>
+								<select
+									id="funnel-select"
+									value={selected?.id ?? ""}
+									onChange={(event) => setSelectedId(event.target.value)}
+								>
+									{funnels.map((funnel) => (
+										<option key={funnel.id} value={funnel.id}>
+											{funnel.displayName}
+										</option>
+									))}
+								</select>
 								{isAdmin && (
-									<div className={styles.reportActions}>
-										<button type="button" className="button-ghost" onClick={() => setEditor({ funnel: selected })}>
-											Edit
-										</button>
-										<button type="button" className="button-ghost" onClick={() => setDeleting(selected)}>
-											Delete
-										</button>
+									<button type="button" onClick={() => setEditor({ funnel: null })}>
+										New funnel
+									</button>
+								)}
+							</div>
+						</div>
+						<SelectFilters value={filters} onChange={setFilters} dimensions={filterDimensions} />
+						{selected && (
+							<article className={styles.card}>
+								<header className={styles.reportHeader}>
+									<div className={styles.reportTitle}>
+										<h2>{selected.displayName}</h2>
+										{!countsHidden && first > 0 && (
+											<p className={styles.completion}>
+												<strong>{formatPercent(completion)}</strong> of visitor groups completed all{" "}
+												{selected.steps.length} steps · {formatMetricVal(last, "views")} groups
+											</p>
+										)}
+										{report.isLoading && report.report && (
+											<span className={styles.updating} role="status" aria-label="Updating report">
+												<LoadingSpinner immediate />
+											</span>
+										)}
+									</div>
+									{isAdmin && (
+										<div className={styles.reportActions}>
+											<button type="button" className="button-ghost" onClick={() => setEditor({ funnel: selected })}>
+												Edit
+											</button>
+											<button type="button" className="button-ghost" onClick={() => setDeleting(selected)}>
+												Delete
+											</button>
+										</div>
+									)}
+								</header>
+								{report.hiddenEvents ? (
+									<p className={styles.message}>This funnel uses custom events, which are hidden for this project.</p>
+								) : report.error ? (
+									<p className={styles.message}>Failed to load the funnel report.</p>
+								) : report.isLoading && !report.report ? (
+									<div className={styles.loading} role="status" aria-label="Loading funnel report">
+										<LoadingSpinner />
+									</div>
+								) : first === 0 ? (
+									<p className={styles.message}>No visitor groups matched the first step in this range.</p>
+								) : (
+									<div className={styles.tableScroll}>
+										<table className={styles.table}>
+											<caption className={styles.caption}>
+												Visitor groups that reached each step of {selected.displayName}
+											</caption>
+											<thead>
+												<tr>
+													<th scope="col">Step</th>
+													<th scope="col" className={styles.number}>
+														Visitor groups
+													</th>
+													<th scope="col" className={styles.number}>
+														From step 1
+													</th>
+													<th scope="col" className={styles.number}>
+														Drop-off
+													</th>
+												</tr>
+											</thead>
+											<tbody>
+												{selected.steps.map((step, index) => {
+													const count = counts[index] ?? 0;
+													const previous = counts[index - 1] ?? 0;
+													const conversion = first > 0 ? (count / first) * 100 : undefined;
+													const dropoff =
+														index === 0 || previous === 0 ? undefined : ((previous - count) / previous) * 100;
+													return (
+														<tr key={index}>
+															<th scope="row" className={styles.stepCell}>
+																<div className={styles.stepHeading}>
+																	<span className={styles.stepNumber}>{index + 1}</span>
+																	<StepIcon step={step} />
+																	<span className={styles.stepName} title={stepName(step)}>
+																		{stepName(step)}
+																	</span>
+																	<span className={styles.stepKind}>
+																		{step.type === "page" ? "Page" : "Custom event"}
+																	</span>
+																	{step.type === "page" && (
+																		<span className={styles.match}>
+																			{matchLabels[(step.matchType ?? "equal") as keyof typeof matchLabels]}
+																		</span>
+																	)}
+																</div>
+																<div className={styles.barTrack} aria-hidden="true">
+																	<div className={styles.bar} style={{ width: `${(count / first) * 100}%` }} />
+																</div>
+															</th>
+															<td className={styles.number}>{formatMetricVal(count, "views")}</td>
+															<td className={styles.number}>
+																{conversion === undefined ? "—" : formatPercent(conversion)}
+															</td>
+															<td className={styles.number}>{dropoff === undefined ? "—" : formatPercent(dropoff)}</td>
+														</tr>
+													);
+												})}
+											</tbody>
+										</table>
 									</div>
 								)}
-							</header>
-							{report.hiddenEvents ? (
-								<p className={styles.message}>This funnel uses custom events, which are hidden for this project.</p>
-							) : report.error ? (
-								<p className={styles.message}>Failed to load the funnel report.</p>
-							) : report.isLoading && !report.report ? (
-								<div className={styles.loading} role="status" aria-label="Loading funnel report">
-									<LoadingSpinner />
-								</div>
-							) : first === 0 ? (
-								<p className={styles.message}>No visitor groups matched the first step in this range.</p>
-							) : (
-								<div className={styles.tableScroll}>
-									<table className={styles.table}>
-										<caption className={styles.caption}>
-											Visitor groups that reached each step of {selected.displayName}
-										</caption>
-										<thead>
-											<tr>
-												<th scope="col">Step</th>
-												<th scope="col" className={styles.number}>
-													Visitor groups
-												</th>
-												<th scope="col" className={styles.number}>
-													From step 1
-												</th>
-												<th scope="col" className={styles.number}>
-													Drop-off
-												</th>
-											</tr>
-										</thead>
-										<tbody>
-											{selected.steps.map((step, index) => {
-												const count = counts[index] ?? 0;
-												const previous = counts[index - 1] ?? 0;
-												const conversion = first > 0 ? (count / first) * 100 : undefined;
-												const dropoff =
-													index === 0 || previous === 0 ? undefined : ((previous - count) / previous) * 100;
-												return (
-													<tr key={index}>
-														<th scope="row" className={styles.stepCell}>
-															<div className={styles.stepHeading}>
-																<span className={styles.stepNumber}>{index + 1}</span>
-																<StepIcon step={step} />
-																<span className={styles.stepName} title={stepName(step)}>
-																	{stepName(step)}
-																</span>
-																<span className={styles.stepKind}>
-																	{step.type === "page" ? "Page" : "Custom event"}
-																</span>
-																{step.type === "page" && (
-																	<span className={styles.match}>
-																		{matchLabels[(step.matchType ?? "equal") as keyof typeof matchLabels]}
-																	</span>
-																)}
-															</div>
-															<div className={styles.barTrack} aria-hidden="true">
-																<div className={styles.bar} style={{ width: `${(count / first) * 100}%` }} />
-															</div>
-														</th>
-														<td className={styles.number}>{formatMetricVal(count, "views")}</td>
-														<td className={styles.number}>
-															{conversion === undefined ? "—" : formatPercent(conversion)}
-														</td>
-														<td className={styles.number}>{dropoff === undefined ? "—" : formatPercent(dropoff)}</td>
-													</tr>
-												);
-											})}
-										</tbody>
-									</table>
-								</div>
-							)}
-							<p className={styles.legend}>
-								Visitor groups, not people. Groups reset once a day, so steps must happen before that reset to count.
-							</p>
-						</article>
-					)}
-				</>
+								<p className={styles.legend}>
+									Visitor groups, not people. Groups reset once a day, so steps must happen before that reset to count.
+								</p>
+							</article>
+						)}
+					</div>
+				</div>
 			)}
 			{editor && (
 				<FunnelDialog
