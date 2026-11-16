@@ -215,3 +215,12 @@ this screen.
   52 rem switch, 320/768/1024/1440 px, 200 % zoom, light and dark, focus rings,
   delete fallback) is deferred to integration on the combined branch because
   this worktree must not start a server.
+- Integration browser pass (2026-11-16, seeded events on a separate port): at
+  1440 px the rail sits beside the report, a long name wraps inside it, and the
+  selected row keeps both the accent bar and the weight. The 52 rem switch is
+  exact: 831 px hides the rail and shows the labeled select, 833 px does the
+  reverse, and exactly one `New funnel` control is visible at every width.
+  320 px and dark theme show no horizontal page scroll, and changing the narrow
+  select re-renders the report without changing the URL. Not covered: enough
+  funnels to overflow the rail (only four were created), 200 % zoom, and the
+  viewer and list-error states.

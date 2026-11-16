@@ -182,6 +182,13 @@ shape, the report, and the URL builder stay as they are.
   empty submit toast) is deferred to integration, where the coordinator runs
   the seeded server on the combined branch; this worker was told not to start
   a server or bind 9042/4321.
+- Integration browser pass (2026-11-16): hover and Tab both open the tooltip,
+  Escape closes only the tooltip and leaves the dialog open, the popup fits at
+  360 px and clears the input below it, and both themes are readable at 360 and
+  1440 px. A Source-only tag saves with the other values null, and an empty
+  submit still shows the server's "at least one UTM value" toast. Not covered:
+  a touch-emulated tap (no iOS simulator was run); that path relies on Base UI
+  focusing the trigger with `closeOnClick={false}`.
 - Validation: `mise run web:test` (typecheck for all packages, 67 bun tests
   pass), `mise run web:build` (20 pages), and `bun x biome check` on the four
   touched files all pass. No Rust command was run, because the change has no

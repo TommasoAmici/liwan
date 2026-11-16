@@ -191,6 +191,15 @@ report query stay as they are.
   path field's "No paths in this range." is now visible when a query matches
   nothing, which its JSX already intended. Filtering, Escape closing only the
   popup, and the full list on an empty query are unchanged.
+- Re-checked after the fix on the combined branch with seeded events: a query
+  with no match shows "No custom events in this range. Type a name to use it.",
+  the hidden state shows "Custom events are hidden for this project." with zero
+  custom-events requests and a disabled Save, and the list is most completions
+  first (signup 35.3k through share 3.2k), matching the custom-events report.
+  Typing an unlisted name saved it unchanged (`brand_new_event`), Arrow Down +
+  Enter picked a row, and Escape closed only the popup. Not covered: the
+  `truncated` note (the seeded data has 12 events, below the limit) and the
+  loading text (no way to throttle the request in this setup).
 - The input keeps `required`, `maxLength={255}`, `placeholder="signup"`, and
   `aria-label`. A `<label htmlFor>` and matching input `id` satisfy Biome's
   `noLabelWithoutControl`, which does not see Base UI's `Input` inside a
