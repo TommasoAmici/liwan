@@ -207,3 +207,9 @@ and picker classes. Both plans add one sentence to `README.md` and one
 `### Features` bullet to the same `[Unreleased]` list; keep both entries
 whichever ships first, and neither plan may rename or remove the other's
 classes.
+
+The open [2026-11-16-utm-field-help.md](2026-11-16-utm-field-help.md) plan adds
+one `### Features` bullet to the same `[Unreleased]` list for the UTM tag
+editor, and one sentence to a different `README.md` paragraph. Its bullet is
+additive too: keep all three, and do not replace the UTM entry with this plan's.
+It touches no funnel code.

@@ -182,6 +182,12 @@ or remove the other's classes. Do not have two workers rewrite the same block of
 `funnels.module.css`; this plan owns the screen and report classes, that plan
 owns the dialog and suggestion classes.
 
+The open [2026-11-16-utm-field-help.md](2026-11-16-utm-field-help.md) plan adds
+one `### Features` bullet to the same `[Unreleased]` list for the UTM tag
+editor, and one sentence to a different `README.md` paragraph. Its bullet is
+additive too: keep all three, and do not replace the UTM entry with this plan's.
+It touches no funnel code.
+
 The shipped [2026-11-15-project-funnels.md](../DONE/2026-11-15-project-funnels.md)
 plan owns the funnel store, query, routes, page, and original editor. Its
 checklist's "wrapping row of saved funnel buttons", "button row wraps", and "Do
