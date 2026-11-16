@@ -177,25 +177,31 @@ report query stay as they are.
   `dialog.tsx`. `useCustomEvents` is called with an empty `filters` array and
   `enabled: !customEventsHidden`, and rows map to
   `{ name, completions: row.completions ?? 0 }` without slicing.
-- The dialog reuses the existing `.path*` classes unchanged, so
-  `funnels.module.css` has no diff and there is no second set of styles. The
-  `path*` names stay as they are to keep the merge with the funnel sidebar work
-  small.
+- The dialog reuses the existing `.path*` classes, so there is no second set of
+  styles. The `path*` names stay as they are to keep the merge with the funnel
+  sidebar work small.
 - Popup states: `Autocomplete.Status` shows "Loading custom events…" while the
   hook fetches, `Autocomplete.Empty` shows the hidden, error, or no-events text,
   and a truncated report adds "Showing the top events only.".
+- The integration browser pass found that the pre-existing
+  `.pathPositioner[data-empty] { display: none; }` rule hid the positioner in
+  exactly the empty-list states Base UI marks, so none of the four popup texts
+  were visible. The rule is removed, so the popup shows its status or empty
+  content; the `.pathEmpty` styling already existed for it. As a consequence the
+  path field's "No paths in this range." is now visible when a query matches
+  nothing, which its JSX already intended. Filtering, Escape closing only the
+  popup, and the full list on an empty query are unchanged.
 - The input keeps `required`, `maxLength={255}`, `placeholder="signup"`, and
   `aria-label`. A `<label htmlFor>` and matching input `id` satisfy Biome's
   `noLabelWithoutControl`, which does not see Base UI's `Input` inside a
   wrapping label.
 - Validation: `mise run web:test` (typecheck and 67 bun tests) and
-  `mise run web:build` pass, and `biome check` is clean on `dialog.tsx`.
+  `mise run web:build` pass, and `biome check` is clean on `dialog.tsx`. Both
+  pass again after the empty-popup fix.
 - Limitation, unchanged on purpose: event matching stays case-sensitive on the
   server, and a typed name that is not suggested saves exactly as typed.
-- The browser check (suggestions against the custom-events card, keyboard
-  selection, hidden-project states, 320 px and 1440 px in light and dark,
-  console and network log) was deferred to the integration branch, because this
-  worktree must not start a server.
+- The browser check runs on the integration branch, which found the empty-popup
+  defect recorded above; this worktree must not start a server.
 
 **Out of scope.**
 
