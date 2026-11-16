@@ -45,6 +45,7 @@ pub fn router() -> ApiRouter<RouterState> {
         .api_route("/project/{project_id}/settings", get(project_settings_handler))
         .api_route("/project/{project_id}/settings", put(project_settings_update_handler))
         .api_route("/projects", get(projects_handler))
+        .api_route("/projects/order", put(reorder_projects_handler))
         .api_route("/project/{project_id}", get(project_handler))
         .api_route("/project/{project_id}", delete(project_delete_handler))
         .api_route("/entities", get(entities_handler))
@@ -150,6 +151,12 @@ struct CreateProjectRequest {
     visibility: ProjectVisibility,
     secret: Option<String>,
     entities: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ReorderProjectsRequest {
+    project_ids: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone)]
@@ -581,6 +588,19 @@ async fn projects_handler(app: State<RouterState>, MaybeAuth(user): MaybeAuth) -
     .http_err("Failed to get projects", StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(ProjectsResponse { projects }))
+}
+
+async fn reorder_projects_handler(
+    app: State<RouterState>,
+    Admin(_): Admin,
+    Json(request): Json<ReorderProjectsRequest>,
+) -> ApiResult<impl IntoApiResponse> {
+    tokio::task::spawn_blocking(move || app.projects.reorder(&request.project_ids))
+        .await
+        .http_status(StatusCode::INTERNAL_SERVER_ERROR)?
+        .http_err("Failed to update project order", StatusCode::BAD_REQUEST)?;
+
+    Ok(empty_response())
 }
 
 async fn project_handler(

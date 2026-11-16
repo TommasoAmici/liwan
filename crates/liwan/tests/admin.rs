@@ -696,3 +696,96 @@ async fn funnels_belong_to_one_project() -> Result<()> {
     assert!(app.funnels.list("public")?.is_empty());
     Ok(())
 }
+
+fn create_project(app: &liwan::app::Liwan, id: &str) -> Result<()> {
+    app.projects.create(
+        &Project { id: id.into(), display_name: id.into(), visibility: ProjectVisibility::Private, secret: None },
+        &[],
+    )?;
+    Ok(())
+}
+
+async fn project_ids(client: &common::TestClient, headers: Vec<(String, String)>) -> Vec<String> {
+    let listed: Value = client.get_with_headers("/api/dashboard/projects", headers).await.json();
+    listed["projects"].as_array().unwrap().iter().map(|project| project["id"].as_str().unwrap().to_string()).collect()
+}
+
+#[tokio::test]
+async fn project_order_updates_the_project_list() -> Result<()> {
+    let app = common::app();
+    let (queues, _receivers) = common::events();
+    let client = common::TestClient::new(app.clone(), queues);
+    app.users.create("admin", "testtest", UserRole::Admin)?;
+    app.users.create("viewer", "testtest", UserRole::User)?;
+    for id in ["a", "b", "c"] {
+        create_project(&app, id)?;
+    }
+    let admin = common::login(&client, "admin", "testtest").await;
+    let headers = || vec![("cookie".into(), common::cookie_header(&admin))];
+    assert_eq!(project_ids(&client, headers()).await, ["a", "b", "c"]);
+
+    client
+        .put_with_headers("/api/dashboard/projects/order", json!({"projectIds": ["c", "a", "b"]}), headers())
+        .await
+        .assert_status_success();
+    assert_eq!(project_ids(&client, headers()).await, ["c", "a", "b"]);
+
+    let viewer = common::login(&client, "viewer", "testtest").await;
+    client
+        .put_with_headers(
+            "/api/dashboard/projects/order",
+            json!({"projectIds": ["a", "b", "c"]}),
+            vec![("cookie".into(), common::cookie_header(&viewer))],
+        )
+        .await
+        .assert_status_forbidden();
+    assert_eq!(project_ids(&client, headers()).await, ["c", "a", "b"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn project_order_rejects_lists_that_do_not_name_every_project() -> Result<()> {
+    let app = common::app();
+    let (queues, _receivers) = common::events();
+    let client = common::TestClient::new(app.clone(), queues);
+    app.users.create("admin", "testtest", UserRole::Admin)?;
+    for id in ["a", "b", "c"] {
+        create_project(&app, id)?;
+    }
+    let admin = common::login(&client, "admin", "testtest").await;
+    let headers = || vec![("cookie".into(), common::cookie_header(&admin))];
+    client
+        .put_with_headers("/api/dashboard/projects/order", json!({"projectIds": ["c", "a", "b"]}), headers())
+        .await
+        .assert_status_success();
+
+    for candidate in [json!(["c", "a"]), json!(["c", "a", "b", "d"]), json!(["c", "a", "a"]), json!([])] {
+        client
+            .put_with_headers("/api/dashboard/projects/order", json!({ "projectIds": candidate }), headers())
+            .await
+            .assert_status(http::StatusCode::BAD_REQUEST);
+        assert_eq!(project_ids(&client, headers()).await, ["c", "a", "b"], "{candidate}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn project_order_appends_new_projects() -> Result<()> {
+    let app = common::app();
+    let (queues, _receivers) = common::events();
+    let client = common::TestClient::new(app.clone(), queues);
+    app.users.create("admin", "testtest", UserRole::Admin)?;
+    for id in ["a", "b", "c"] {
+        create_project(&app, id)?;
+    }
+    let admin = common::login(&client, "admin", "testtest").await;
+    let headers = || vec![("cookie".into(), common::cookie_header(&admin))];
+    client
+        .put_with_headers("/api/dashboard/projects/order", json!({"projectIds": ["c", "a", "b"]}), headers())
+        .await
+        .assert_status_success();
+
+    create_project(&app, "d")?;
+    assert_eq!(project_ids(&client, headers()).await, ["c", "a", "b", "d"]);
+    Ok(())
+}
