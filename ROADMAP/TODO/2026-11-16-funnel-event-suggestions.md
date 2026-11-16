@@ -61,7 +61,11 @@ report query stay as they are.
     the `path*` classes to `suggestion*` only if the shared name reads better;
     either way there is one set of styles, not a second copy). Use theme tokens
     and the existing field sizing. The popup must sit above the dialog, as the
-    path popup does, and the row layout must stay readable at 320 px.
+    path popup does, and the row layout must stay readable at 320 px. This plan
+    owns the dialog and suggestion classes only;
+    [2026-11-16-funnel-sidebar.md](2026-11-16-funnel-sidebar.md) owns the
+    screen, rail, list, and picker classes in the same file. Do not rename or
+    remove its classes, and keep both README and changelog entries.
   - Do not change the create/update request, the server validation, or any
     other screen. The event field remains the only place that suggests events.
 
@@ -195,3 +199,11 @@ changes the container image. The shipped
 [2026-11-15-project-funnels.md](../DONE/2026-11-15-project-funnels.md) plan owns
 the funnel store, query, routes, page, and the original editor; this plan only
 changes how one step field is filled.
+
+This plan also shares `funnels.module.css` with the open
+[2026-11-16-funnel-sidebar.md](2026-11-16-funnel-sidebar.md) plan. This plan owns
+the dialog and suggestion classes only; that plan owns the screen, rail, list,
+and picker classes. Both plans add one sentence to `README.md` and one
+`### Features` bullet to the same `[Unreleased]` list; keep both entries
+whichever ships first, and neither plan may rename or remove the other's
+classes.
