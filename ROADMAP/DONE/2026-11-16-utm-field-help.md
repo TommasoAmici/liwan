@@ -12,7 +12,7 @@ shape, the report, and the URL builder stay as they are.
 
 ## Checklist
 
-- [ ] Add an accessible help tooltip to the shared UI. Create
+- [x] Add an accessible help tooltip to the shared UI. Create
       `packages/web/src/components/ui/help-tip.tsx` and
       `help-tip.module.css`, following the small shared-component pattern of
       `components/ui/snippet.tsx`:
@@ -44,7 +44,7 @@ shape, the report, and the URL builder stay as they are.
   - `type="button"` is required: the trigger sits inside the editor's `<form>`
     and a default `<button>` would submit the dialog when clicked.
 
-- [ ] Put the five descriptions next to the fields in
+- [x] Put the five descriptions next to the fields in
       `packages/web/src/components/dashboard/project/utm-tags/dialog.tsx`. The
       current `field()` helper at line 101 wraps the label text and input in one
       `<label>`; a help button inside a label would activate the input, so
@@ -92,7 +92,7 @@ shape, the report, and the URL builder stay as they are.
   line matches the server's existing validation; it does not add client-side
   validation or mark a field inline.
 
-- [ ] Document the visible change. Add one sentence to the **Campaign links**
+- [x] Document the visible change. Add one sentence to the **Campaign links**
       paragraph in `README.md` after the existing text: "The editor explains
       what each UTM field is for." Append one `### Features` bullet under the
       existing `## [Unreleased]` heading in `CHANGELOG.md` per the
@@ -141,6 +141,51 @@ shape, the report, and the URL builder stay as they are.
 - The shipped UTM plan's note that the dialog has no inline validation still
   stands. The new group line tells the user the rule; an empty submit still
   fails server-side and shows a toast.
+
+**Implementation (2026-11-16).**
+
+- `components/ui/help-tip.tsx` exports `HelpTip({ label, description })` and
+  owns `help-tip.module.css`. It is the plan's structure: `Tooltip.Root` →
+  `Trigger` (`type="button"`, `delay={200}`, `closeOnClick={false}`,
+  `aria-label="About <label>"`, a 24×24 icon button around a 14 px
+  `CircleHelpIcon` with `aria-hidden`) → `Portal` → `Positioner`
+  (`side="top"`, `sideOffset={6}`, `z-index: 110` so it sits above the dialog's
+  `100`) → `Popup`. No `Tooltip.Provider`: in Base UI 1.9 it is optional and
+  only groups tooltips for a shared delay.
+- The popup is a flex column with the field label as a 600-weight heading and
+  the description in `--text-muted`, capped at
+  `min(18rem, calc(100vw - 1rem))` so it stays in a 360 px viewport. The
+  trigger's `min-height` is reset because the global button rule gives every
+  `<button>` `min-height: 2.15rem`.
+- `utm-tags/dialog.tsx` keeps the `field()` helper but it now takes the input id
+  instead of a max length. The five descriptions live in a typed
+  `Record<UtmFieldKey, string>` at module scope, verbatim from the plan. One
+  `useId()` per dialog builds `<id>-source`, `<id>-medium`, `<id>-campaign`,
+  `<id>-content`, `<id>-term`; the label uses `htmlFor`, and the button sits in
+  a sibling `.fieldLabel` row, never inside the `<label>`. `maxLength={200}`,
+  value/change handling, and trim-on-submit are unchanged.
+- The group line is one `<p className={styles.groupHint}>` directly above
+  `.formFields`; `<strong>` carries "UTM parameters." `utm-tags.module.css` adds
+  `.groupHint` (muted, `--font-size-sm`), `.field` (column flex, 0.35 rem gap —
+  the same space `label > input` used to add), and `.fieldLabel` (row flex).
+  The two-column grid and its 32 rem breakpoint are untouched.
+- Base UI already scopes Escape to the innermost popup: a nested tooltip marks
+  the keydown handled, so Escape closes the tooltip without closing the dialog.
+  Blur and closing the dialog also dismiss it. Nothing needed for that beyond
+  the default `Root` behavior.
+- `README.md` gains the sentence "The editor explains what each UTM field is
+  for." at the end of **Campaign links**, and `CHANGELOG.md` gains
+  "- The UTM tag editor now explains what each field is for." at the end of the
+  `[Unreleased]` `### Features` list. No other line was moved or reworded.
+- No test file, per plan: the copy is static and the web test setup has no DOM
+  environment. The browser pass (hover, keyboard, touch at 360 px, both themes,
+  empty submit toast) is deferred to integration, where the coordinator runs
+  the seeded server on the combined branch; this worker was told not to start
+  a server or bind 9042/4321.
+- Validation: `mise run web:test` (typecheck for all packages, 67 bun tests
+  pass), `mise run web:build` (20 pages), and `bun x biome check` on the four
+  touched files all pass. No Rust command was run, because the change has no
+  Rust.
 
 **Landmarks.**
 
