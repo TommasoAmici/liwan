@@ -1,10 +1,11 @@
 import styles from "./utm-tags.module.css";
 
 import type { FormEvent } from "react";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { api, useMutation } from "@/api";
 import { Dialog } from "@/components/ui/dialog";
+import { HelpTip } from "@/components/ui/help-tip";
 import { CopyButton } from "@/components/ui/snippet";
 import { createToast } from "@/components/ui/toast";
 import type { UtmTag, UtmTagRequest } from "@/constants";
@@ -44,6 +45,20 @@ const trimmed = (value: string | null | undefined) => {
 	return text ? text : null;
 };
 
+type UtmFieldKey = Exclude<keyof UtmTagRequest, "displayName" | "url">;
+
+const utmDescriptions: Record<UtmFieldKey, string> = {
+	utmSource:
+		"Where the visit came from: a website, a newsletter, or an ad platform. Example: google, newsletter, linkedin.",
+	utmMedium:
+		"How the link was shared: email, social media, paid search, or another channel. Example: email, social, cpc.",
+	utmCampaign:
+		"The campaign or promotion the link belongs to. Use the same value on every link in a campaign. Example: spring_sale.",
+	utmContent:
+		"Which link or creative in the campaign was used, to tell two links apart. Example: header_button, sidebar.",
+	utmTerm: "The paid keyword that brought the visit, mostly for search ads. Example: running_shoes.",
+};
+
 export const UtmTagDialog = ({
 	projectId,
 	tag,
@@ -56,6 +71,7 @@ export const UtmTagDialog = ({
 	onOpenChange: (open: boolean) => void;
 }) => {
 	const [form, setForm] = useState<UtmTagRequest>(() => formFrom(tag));
+	const fieldId = useId();
 	const preview = buildUtmUrl(form.url, {
 		source: form.utmSource,
 		medium: form.utmMedium,
@@ -98,16 +114,20 @@ export const UtmTagDialog = ({
 		});
 	};
 
-	const field = (key: Exclude<keyof UtmTagRequest, "displayName" | "url">, label: string, maxLength: number) => (
-		<label>
-			{label}
+	const field = (key: UtmFieldKey, label: string, id: string) => (
+		<div className={styles.field}>
+			<div className={styles.fieldLabel}>
+				<label htmlFor={id}>{label}</label>
+				<HelpTip label={label} description={utmDescriptions[key]} />
+			</div>
 			<input
+				id={id}
 				type="text"
 				value={form[key] ?? ""}
-				maxLength={maxLength}
+				maxLength={200}
 				onChange={(event) => setForm({ ...form, [key]: event.currentTarget.value })}
 			/>
-		</label>
+		</div>
 	);
 
 	return (
@@ -136,12 +156,16 @@ export const UtmTagDialog = ({
 						placeholder="https://example.com/landing"
 					/>
 				</label>
+				<p className={styles.groupHint}>
+					<strong>UTM parameters.</strong> Fill in the ones your campaign uses; at least one is required. Reuse the same
+					values across links so reports add them up.
+				</p>
 				<div className={styles.formFields}>
-					{field("utmSource", "Source", 200)}
-					{field("utmMedium", "Medium", 200)}
-					{field("utmCampaign", "Campaign", 200)}
-					{field("utmContent", "Content", 200)}
-					{field("utmTerm", "Term", 200)}
+					{field("utmSource", "Source", `${fieldId}-source`)}
+					{field("utmMedium", "Medium", `${fieldId}-medium`)}
+					{field("utmCampaign", "Campaign", `${fieldId}-campaign`)}
+					{field("utmContent", "Content", `${fieldId}-content`)}
+					{field("utmTerm", "Term", `${fieldId}-term`)}
 				</div>
 				<div className={styles.preview}>
 					<span className={styles.previewLabel}>Link preview</span>
