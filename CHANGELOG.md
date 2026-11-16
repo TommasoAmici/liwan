@@ -41,6 +41,7 @@ Since this is not a library, this changelog focuses on the changes that are rele
 - Administrators can change the order of projects on the home page in
   *Settings > Projects* with the up and down buttons. The order applies to every
   project list, and existing installs keep the order they have today.
+- The UTM tag editor now explains what each field is for.
 
 ### Other
 
