@@ -102,7 +102,8 @@ impl LiwanEntities {
     pub fn projects(&self, entity_id: &str) -> Result<Vec<models::Project>> {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare_cached(
-            "select p.id, p.display_name, p.visibility, p.secret from projects p join project_entities pe on p.id = pe.project_id where pe.entity_id = ?",
+            "select p.id, p.display_name, p.visibility, p.secret from projects p join project_entities pe on p.id = pe.project_id where pe.entity_id = ?
+             order by p.sort_order, p.display_name collate nocase, p.id",
         )?;
         let projects = stmt.query_map(rusqlite::params![entity_id], |row| {
             Ok(models::Project {
@@ -120,7 +121,8 @@ impl LiwanEntities {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare_cached(
             "select pe.entity_id, p.id, p.display_name, p.visibility, p.secret
-             from project_entities pe join projects p on p.id = pe.project_id",
+             from project_entities pe join projects p on p.id = pe.project_id
+             order by p.sort_order, p.display_name collate nocase, p.id",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((

@@ -70,10 +70,13 @@ impl LiwanProjects {
         Ok(project)
     }
 
-    /// Get all projects
+    /// Get all projects, in the order administrators chose
     pub fn all(&self) -> Result<Vec<models::Project>> {
         let conn = self.pool.get()?;
-        let mut stmt = conn.prepare("select id, display_name, visibility, secret from projects")?;
+        let mut stmt = conn.prepare(
+            "select id, display_name, visibility, secret from projects
+             order by sort_order, display_name collate nocase, id",
+        )?;
         let projects = stmt.query_map([], |row| {
             Ok(models::Project {
                 id: row.get("id")?,
@@ -94,7 +97,8 @@ impl LiwanProjects {
         let mut conn = self.pool.get()?;
         let tx = conn.transaction()?;
         tx.execute(
-            "insert into projects (id, display_name, visibility, secret) values (:id, :display_name, :visibility, :secret)",
+            "insert into projects (id, display_name, visibility, secret, sort_order)
+             values (:id, :display_name, :visibility, :secret, (select coalesce(max(sort_order) + 1, 0) from projects))",
             rusqlite::named_params! {
                 ":id": project.id,
                 ":display_name": project.display_name,
@@ -146,5 +150,81 @@ impl LiwanProjects {
         tx.execute("delete from project_entities where project_id = ?", rusqlite::params![id])?;
         tx.commit()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{Liwan, models::ProjectVisibility};
+    use crate::config::Config;
+
+    fn app_with_projects(ids: &[&str]) -> std::sync::Arc<Liwan> {
+        let app = Liwan::new_memory(Config::default()).unwrap();
+        for id in ids {
+            app.projects
+                .create(
+                    &models::Project {
+                        id: (*id).into(),
+                        display_name: (*id).into(),
+                        visibility: ProjectVisibility::Private,
+                        secret: None,
+                    },
+                    &[],
+                )
+                .unwrap();
+        }
+        app
+    }
+
+    fn listed(app: &Liwan) -> Vec<String> {
+        app.projects.all().unwrap().into_iter().map(|project| project.id).collect()
+    }
+
+    fn set_positions(app: &Liwan, ids: &[&str]) {
+        let conn = app.projects.pool.get().unwrap();
+        for (position, id) in ids.iter().enumerate() {
+            conn.execute("update projects set sort_order = ? where id = ?", rusqlite::params![position as i64, id])
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn projects_are_listed_in_creation_order() {
+        let app = app_with_projects(&["zeta", "alpha", "mu"]);
+        assert_eq!(listed(&app), ["zeta", "alpha", "mu"]);
+    }
+
+    #[test]
+    fn projects_are_listed_in_their_configured_order() {
+        let app = app_with_projects(&["a", "b", "c"]);
+        set_positions(&app, &["c", "a", "b"]);
+        assert_eq!(listed(&app), ["c", "a", "b"]);
+    }
+
+    #[test]
+    fn projects_sharing_a_position_are_listed_by_name() {
+        let app = app_with_projects(&["zeta", "Alpha"]);
+        let conn = app.projects.pool.get().unwrap();
+        conn.execute("update projects set sort_order = 0", []).unwrap();
+        assert_eq!(listed(&app), ["Alpha", "zeta"]);
+    }
+
+    #[test]
+    fn a_new_project_is_appended_at_the_end() {
+        let app = app_with_projects(&["a", "b", "c"]);
+        set_positions(&app, &["c", "a", "b"]);
+        app.projects
+            .create(
+                &models::Project {
+                    id: "d".into(),
+                    display_name: "d".into(),
+                    visibility: ProjectVisibility::Private,
+                    secret: None,
+                },
+                &[],
+            )
+            .unwrap();
+        assert_eq!(listed(&app), ["c", "a", "b", "d"]);
     }
 }

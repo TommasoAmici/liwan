@@ -10,7 +10,7 @@ project list follow it.
 
 ## Checklist
 
-- [ ] Add the order column and its initial values. Create
+- [x] Add the order column and its initial values. Create
       `crates/liwan/src/migrations/app/V12__project_order.sql`:
 
   ```sql
@@ -165,6 +165,24 @@ project list follow it.
   untouched. `packages/api` and `crates/api` are not changed: neither client has
   dashboard endpoints, and the ingest wire format is untouched.
 - Nothing in this plan changes collected data, events, reports or retention.
+
+**Storage and read order (2026-11-16).**
+
+- `projects.sort_order` is an `integer not null default 0` column added by
+  `crates/liwan/src/migrations/app/V12__project_order.sql`. The migration
+  backfills positions from rowid order once, so an existing install keeps the
+  order it showed before the upgrade.
+- `LiwanProjects::all` sorts by `sort_order, display_name collate nocase, id`;
+  `create` appends with `(select coalesce(max(sort_order) + 1, 0) from projects)`
+  inside its existing transaction. `LiwanEntities::projects` and
+  `projects_by_entity` use the same ordering, so the entity screens agree with
+  the home page. `projects_by_entity` scans globally ordered rows into a
+  per-entity map, which still leaves each entity's vector in project order.
+- Tests: `app::core::projects::tests` covers creation order, a configured order,
+  the name tie-break and appending a new project.
+  `app::db::tests::project_order_migration_preserves_the_existing_order` runs the
+  migration SQL against a minimal old `projects` table, without the full
+  migration runner.
 
 **Landmarks.**
 

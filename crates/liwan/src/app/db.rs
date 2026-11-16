@@ -226,4 +226,25 @@ mod tests {
             .unwrap();
         assert!(exists, "the entity index migration did not apply");
     }
+
+    #[test]
+    fn project_order_migration_preserves_the_existing_order() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "create table projects (id text primary key not null, display_name text not null);
+             insert into projects (id, display_name) values ('a', 'Alpha'), ('b', 'Beta'), ('c', 'Gamma');",
+        )
+        .unwrap();
+
+        conn.execute_batch(include_str!("../migrations/app/V12__project_order.sql")).unwrap();
+
+        let order = conn
+            .prepare("select id from projects order by sort_order")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(order, ["a", "b", "c"]);
+    }
 }
