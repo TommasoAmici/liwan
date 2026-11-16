@@ -10,11 +10,12 @@ import type { DateRange } from "@/api/ranges";
 import { Dialog } from "@/components/ui/dialog";
 import { createToast } from "@/components/ui/toast";
 import type { Funnel, ProjectResponse } from "@/constants";
-import { invalidateFunnels, useDimension } from "@/hooks/api";
+import { invalidateFunnels, useCustomEvents, useDimension } from "@/hooks/api";
 import { formatMetricVal } from "@/utils";
 import { type EditorStep, editorStepFrom, type FunnelMatchType, funnelStepFrom, matchLabels, matchTypes } from "./step";
 
 type PathSuggestion = { path: string; views: number };
+type EventSuggestion = { name: string; completions: number };
 
 const emptySteps = (): EditorStep[] => [
 	{ type: "page", path: "", matchType: "equal" },
@@ -55,6 +56,22 @@ export const FunnelDialog = ({
 	const pathSuggestions = (pathRows.data ?? [])
 		.flatMap((row) => (row.dimensionValue && row.value ? [{ path: row.dimensionValue, views: row.value }] : []))
 		.slice(0, 100);
+	// Event suggestions follow the selected range, most completions first. A name
+	// that has no traffic yet can still be typed, so a new event is never blocked.
+	// Report filters stay out on purpose: they would hide the event being looked
+	// for. The endpoint refuses the request when custom events are hidden.
+	const events = useCustomEvents({ projectId, range, filters: [], enabled: !customEventsHidden });
+	const eventSuggestions = (events.data?.rows ?? []).map((row) => ({
+		name: row.name,
+		completions: row.completions ?? 0,
+	}));
+	const eventEmpty = customEventsHidden
+		? "Custom events are hidden for this project."
+		: events.error
+			? "Could not load custom events. Type a name to use it."
+			: events.isLoading
+				? undefined
+				: "No custom events in this range. Type a name to use it.";
 
 	const { mutate, isPending } = useMutation({
 		mutationFn: async (body: { displayName: string; steps: ReturnType<typeof funnelStepFrom>[] }) => {
@@ -209,16 +226,53 @@ export const FunnelDialog = ({
 									</>
 								) : (
 									<>
-										<label className={styles.stepField}>
+										<label className={styles.stepField} htmlFor={`${formId}-event-${index}`}>
 											Event name
-											<input
-												type="text"
+											<Autocomplete.Root
+												items={eventSuggestions}
 												value={step.name}
-												onChange={(event) => update(index, { ...step, name: event.currentTarget.value })}
-												required
-												maxLength={255}
-												placeholder="signup"
-											/>
+												onValueChange={(name) => update(index, { ...step, name })}
+												itemToStringValue={(item: EventSuggestion) => item.name}
+												filter={(item: EventSuggestion, query: string) =>
+													item.name.toLowerCase().includes(query.toLowerCase())
+												}
+												openOnInputClick
+												autoHighlight="always"
+											>
+												<Autocomplete.Input
+													id={`${formId}-event-${index}`}
+													type="text"
+													required
+													maxLength={255}
+													placeholder="signup"
+													aria-label={`Step ${index + 1} event name`}
+												/>
+												<Autocomplete.Portal>
+													<Autocomplete.Positioner className={styles.pathPositioner} sideOffset={4}>
+														<Autocomplete.Popup className={styles.pathPopup}>
+															<Autocomplete.Status className={events.isLoading ? styles.pathEmpty : undefined}>
+																{events.isLoading ? "Loading custom events…" : null}
+															</Autocomplete.Status>
+															<Autocomplete.List className={styles.pathList}>
+																{(item: EventSuggestion) => (
+																	<Autocomplete.Item key={item.name} value={item} className={styles.pathItem}>
+																		<span className={styles.pathName}>{item.name}</span>
+																		<span className={styles.pathCount}>
+																			{formatMetricVal(item.completions, "views")} events
+																		</span>
+																	</Autocomplete.Item>
+																)}
+															</Autocomplete.List>
+															<Autocomplete.Empty className={eventEmpty ? styles.pathEmpty : undefined}>
+																{eventEmpty}
+															</Autocomplete.Empty>
+															{events.data?.truncated && (
+																<div className={styles.pathEmpty}>Showing the top events only.</div>
+															)}
+														</Autocomplete.Popup>
+													</Autocomplete.Positioner>
+												</Autocomplete.Portal>
+											</Autocomplete.Root>
 										</label>
 										{customEventsHidden && (
 											<p className={styles.warning}>
