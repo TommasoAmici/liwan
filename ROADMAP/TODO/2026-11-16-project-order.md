@@ -128,7 +128,7 @@ project list follow it.
   extend the description to say that administrators choose the order projects
   appear on the home page, so non-admins understand why the list has this order.
 
-- [ ] Tell the people who use it. In `CHANGELOG.md` under `## [Unreleased]` /
+- [x] Tell the people who use it. In `CHANGELOG.md` under `## [Unreleased]` /
       `### Features`, add a short plain-American-English line: administrators
       can change the order of projects on the home page, and the order applies
       to every project list. In `README.md`, extend the "Understand your
@@ -239,6 +239,21 @@ project list follow it.
   same order. At 320 px the shared table scrolls horizontally as before; the
   Order column itself is fully visible. The screenshots were local checks and are
   not committed.
+
+**Docs and final validation (2026-11-16).**
+
+- `CHANGELOG.md` has one `### Features` line under `[Unreleased]` and
+  `README.md` extends *Understand your traffic* with the administrator choice.
+  There is no `data/config.example.toml` or `AGENTS.md` change: this adds no
+  operator setting, script or command, and the migration is internal.
+- Before the final commit, `mise run rust:lint` (clippy with warnings and
+  `cargo fmt --check`), `mise run web:test` (typecheck and 67 bun tests) and
+  `mise run rust:test` (the full workspace suite, including the
+  `project_order_*` HTTP tests) all passed.
+- Known limitations, all in scope of the plan: a deleted project can leave a gap
+  in the positions and nothing renumbers it (display and append do not care),
+  and two open sessions do not see each other's reorder until their own query
+  refetches.
 
 **Landmarks.**
 

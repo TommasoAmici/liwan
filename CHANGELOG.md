@@ -38,6 +38,9 @@ Since this is not a library, this changelog focuses on the changes that are rele
   for the selected range and filters. Administrators define the funnels; anyone
   who can view the project sees the results. Counts are visitor groups, which
   reset once a day.
+- Administrators can change the order of projects on the home page in
+  *Settings > Projects* with the up and down buttons. The order applies to every
+  project list, and existing installs keep the order they have today.
 
 ### Other
 
