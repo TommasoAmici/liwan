@@ -41,6 +41,8 @@ Since this is not a library, this changelog focuses on the changes that are rele
 - Administrators can change the order of projects on the home page in
   *Settings > Projects* with the up and down buttons. The order applies to every
   project list, and existing installs keep the order they have today.
+- The funnel editor now suggests the custom events seen in the selected range,
+  and still accepts a name that has not appeared yet.
 
 ### Other
 
