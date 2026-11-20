@@ -16,7 +16,7 @@ The format is roughly based on the output of `git-cliff` and this project adhere
 Since this is not a library, this changelog focuses on the changes that are relevant to the end-users. For a detailed list of changes, see the commit history, which adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). New releases are created automatically when a new tag is pushed (Commit message: chore(release): vX.X.X).
 -->
 
-## [Unreleased]
+## [v1.9.0] - 2026-11-20
 
 ### Features
 
@@ -45,7 +45,14 @@ Since this is not a library, this changelog focuses on the changes that are rele
   and still accepts a name that has not appeared yet.
 - Saved funnels now sit in a sidebar beside the report on the *Funnels* screen.
   On narrow screens, choose the funnel from the *Funnel* menu.
+- The filters you set on a project dashboard are kept in the page address, so
+  refreshing keeps them and a shared link opens the same view.
 - The UTM tag editor now explains what each field is for.
+
+### Bug Fixes
+
+- Fixed automatic MaxMind database updates failing when the download metadata
+  contained numeric timestamps.
 
 ### Other
 
