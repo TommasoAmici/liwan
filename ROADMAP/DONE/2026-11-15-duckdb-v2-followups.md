@@ -1,6 +1,6 @@
 # DuckDB 2.0 follow-ups: converted storage, verified copies, VARIANT
 
-Liwan bundles DuckDB 2.0.0, and the engine-level gains of 2.0 already apply:
+Liwan bundles DuckDB 2.0, and the engine-level gains of 2.0 already apply:
 partial aggregates below joins, row-group pruning for `IN` and function
 predicates, and aggregation spill to disk. What an existing install does not get
 is the v2 storage format, because `upgrade-duckdb` is explicit and most
@@ -207,7 +207,7 @@ DuckDB recommends for production.
       route or schema changed, so do not regenerate the OpenAPI client. Do not
       add a config key for versioning the layout.
 
-- [ ] Move to DuckDB 2.0.1 when its bindings are published. The release is
+- [x] Move to DuckDB 2.0.1 when its bindings are published. The release is
       planned for 2026-11-18 and DuckDB recommends it for production. The crate
       version encodes the engine version, so the 2.0.1 line should be
       `1.20001.x`; check crates.io and do not guess. Change the `duckdb`
@@ -461,14 +461,34 @@ that evaluates to SQL NULL cannot be read as a String through this driver
 (`InvalidColumnType(..., Null)`), so a production read would have to coalesce
 or exclude NULLs explicitly.
 
-**DuckDB 2.0.1 (item 7, open).** crates.io had `1.20000.2` as the newest
-`duckdb` version on 2026-11-15 and no `1.20001.x` line, so the requirement in
-`crates/liwan/Cargo.toml` is unchanged and `cargo update` was not run. Do not
-pin a pre-release or a git revision. Resume when `1.20001.x` is published: bump
-the requirement to that line, run `cargo test -p liwan --lib` (the
-fresh-database test still asserts a `v2.` storage tag), the full
-`mise run rust:test` and `mise run rust:lint`, and both benches; re-run the
-storage measurement only if 2.0.1 changes compression or storage behavior.
+**DuckDB 2.0.1 (item 7, shipped 2026-11-20).** The engine shipped on
+2026-11-20 and duckdb-rs published the bindings the same evening as
+`1.20001.0`, after its release CI passed; the requirement in
+`crates/liwan/Cargo.toml` moved from `1.20000` to `1.20001` and
+`cargo update -p duckdb -p libduckdb-sys` locked both crates to `1.20001.0`.
+The bundled source reports `v2.0.1`, and no source change was needed.
+
+Validated on the seeded 7.1-million-event database: `cargo test -p liwan --lib`
+(150 passed, including the fresh-database `v2.` assertion), `mise run
+rust:test`, `mise run rust:lint`, and one run each of `--bench ingest` and
+`--bench reports`.
+
+Reading the release notes against Liwan, the changed external behaviors do not
+touch it: no `UPDATE ... FROM` or `MERGE` statement is in `crates/liwan`, no
+report uses `quantile`/`arg_max`, and extensions stay off with
+`allow_community_extensions=false`, so the stricter `SECRET` scopes and the
+`allow_extension_repositories` default are moot. 2.0.1 names a `v2.0.1` storage
+version but maps it to version number 69, the same as `v2.0.0`, and the default
+and `latest` still write 69, so converted files remain readable by the 2.0.0
+engine; the fresh-database test's `v2.` prefix and the README's "one-way"
+sentence stay true. No compression or storage behavior changed, so item 1 was
+not re-measured.
+
+The fix that would reach users is the 2.0.1 repair for reading DuckDB 1.x
+files, where 2.0.0 could drop rows with `NULL` values under a filter. It stays
+unchangelogged: 2.0.0 never shipped in a Liwan release (v1.8.1 on 2026-10-23
+predates the bump), so the same unreleased work introduced and fixed it, and no
+operator ran the buggy engine.
 
 **Landmarks.**
 
