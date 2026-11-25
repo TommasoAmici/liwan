@@ -2,16 +2,30 @@ import styles from "./dimensions.module.css";
 
 import { useEffect, useState } from "react";
 import { Tabs } from "@base-ui/react/tabs";
-import { ChevronRightIcon, LinkIcon, MonitorIcon, PinIcon, SquareArrowOutUpRightIcon, TagIcon } from "lucide-react";
+import {
+	ChevronRightIcon,
+	LaptopIcon,
+	LinkIcon,
+	MonitorIcon,
+	PinIcon,
+	SmartphoneIcon,
+	SquareArrowOutUpRightIcon,
+	TabletIcon,
+	TagIcon,
+} from "lucide-react";
 
 import { LoadingSpinner } from "@/components/ui/loading";
-import type { Dimension, DimensionTableRow } from "@/constants";
+import type { Dimension, DimensionTableRow, Metric } from "@/constants";
 import { dimensionNames, eventMetricName } from "@/constants";
 import { useDimension } from "@/hooks/api";
-import { cls, countryCodeToFlag, formatHost, formatMetricVal, formatPath, getHref, tryParseUrl } from "@/utils";
+import { cls, formatHost, formatPath, getHref, tryParseUrl } from "@/utils";
 import { getDimensionFilter, type ProjectQuery } from "..";
-import { BrowserIcon, MobileDeviceIcon, OrientationIcon, OSIcon, ReferrerIcon } from "../icons";
+import type { ComparisonRow } from "../comparison";
+import { BrowserIcon, CountryFlag, MobileDeviceIcon, OrientationIcon, OSIcon, ReferrerIcon } from "../icons";
+import { formatMetricVal, isMetricImprovement } from "../metric-format";
+import { DimensionMetricValue } from "./metric-value";
 import { DetailsModal } from "./modal";
+import { ReportPagination, useReportPagination } from "./pagination";
 
 export type DimensionProps = {
 	dimension: Dimension;
@@ -28,7 +42,7 @@ export const DimensionCard = (props: DimensionProps) => {
 		<article className={styles.card}>
 			<div className={styles.dimensionHeader}>
 				<div>{dimensionNames[props.dimension]}</div>
-				<div>{eventMetricName(props.query.metric, props.query.eventName)}</div>
+				<div className={styles.metricHeading}>{eventMetricName(props.query.metric, props.query.eventName)}</div>
 			</div>
 			<DimensionTable {...props} />
 		</article>
@@ -104,7 +118,7 @@ export const DimensionDropdownCard = ({
 							</option>
 						))}
 					</select>
-					<div>{eventMetricName(query.metric, query.eventName)}</div>
+					<div className={styles.metricHeading}>{eventMetricName(query.metric, query.eventName)}</div>
 				</Tabs.List>
 				{dimensions.map((dimension) => (
 					<Tabs.Panel key={dimension} value={dimension} className={styles.tabsContent}>
@@ -133,7 +147,7 @@ export const DimensionTabs = ({
 						{dimensionNames[value]}
 					</Tabs.Tab>
 				))}
-				<div>{eventMetricName(query.metric, query.eventName)}</div>
+				<div className={styles.metricHeading}>{eventMetricName(query.metric, query.eventName)}</div>
 			</Tabs.List>
 			{dimensions.map((dimension) => (
 				<Tabs.Panel key={dimension} value={dimension} className={styles.tabsContent}>
@@ -145,31 +159,39 @@ export const DimensionTabs = ({
 };
 
 export const DimensionTable = (props: DimensionProps) => {
-	const { data, biggest, isLoading } = useDimension({
+	const report = useDimension({
 		dimension: props.dimension,
 		propertyKey: props.propertyKey,
 		...props.query,
 	});
-	const dataTruncated = data?.slice(0, 6);
+	const { data, biggest, isLoading, error } = report;
+	const { pageRows, hasPages, previous, next } = useReportPagination(
+		data,
+		props.query,
+		`${props.dimension}:${props.propertyKey ?? ""}`,
+	);
 
 	return (
 		<>
-			<div className={styles.dimensionTable} style={{ "--count": 6 } as React.CSSProperties}>
+			<div className={styles.dimensionTable} aria-busy={isLoading}>
 				{isLoading && (
 					<div className={styles.loadingOverlay} data-no-delay={!data}>
 						<LoadingSpinner immediate />
 					</div>
 				)}
-				{dataTruncated?.map((d) => (
+				{pageRows?.map((d) => (
 					<DimensionRow key={d.dimensionValue} {...props} row={d} biggest={biggest} />
 				))}
-				{!isLoading && dataTruncated?.length === 0 && (
+				{!isLoading && (error || pageRows?.length === 0) && (
 					<div className={styles.dimensionEmpty}>
-						<div>No data available</div>
+						<div>{error ? "Could not load this breakdown." : "No data available"}</div>
 					</div>
 				)}
 			</div>
-			<DetailsModal {...props} />
+			<div className={styles.cardFooter}>
+				<DetailsModal {...props} report={report} />
+				{hasPages && !error && <ReportPagination previous={previous} next={next} />}
+			</div>
 		</>
 	);
 };
@@ -184,33 +206,46 @@ export const Breadcrumb = ({ parent, title, onBack }: { parent: string; title: s
 	</div>
 );
 
-export const DimensionValueButton = ({ children, onSelect }: { children: string; onSelect?: () => void }) => (
-	<button type="button" className={styles.dimensionItemSelect} onClick={onSelect}>
-		<span title={children}>{children}</span>
-	</button>
-);
+export const DimensionValueButton = ({ children, onSelect }: { children: string; onSelect?: () => void }) =>
+	onSelect ? (
+		<button type="button" className={styles.dimensionItemSelect} onClick={onSelect}>
+			<span title={children}>{children}</span>
+		</button>
+	) : (
+		<span className={styles.dimensionItemLabel} title={children}>
+			{children}
+		</span>
+	);
 
-const ExternalLink = ({ href, label }: { href: string; label: string }) => (
-	<a href={href} target="_blank" rel="noreferrer" className={styles.external} aria-label={`Open ${label} in a new tab`}>
-		<SquareArrowOutUpRightIcon size={16} />
-	</a>
-);
+const ExternalLink = ({ href, label }: { href?: string; label: string }) =>
+	href && (
+		<a
+			href={href}
+			target="_blank"
+			rel="noreferrer"
+			className={styles.external}
+			aria-label={`Open ${label} in a new tab`}
+		>
+			<SquareArrowOutUpRightIcon size={16} />
+		</a>
+	);
 
-const renderUtmDimensionLabel = (value: DimensionTableRow, onSelect: () => void) => (
+const renderUtmDimensionLabel = (value: DimensionTableRow, onSelect?: () => void) => (
 	<>
 		<PinIcon size={24} />
 		<DimensionValueButton onSelect={onSelect}>{value.dimensionValue || "Unknown/None"}</DimensionValueButton>
 	</>
 );
 
-const renderUrlDimensionLabel = (value: DimensionTableRow, onSelect: () => void) => {
-	const url = tryParseUrl(value.dimensionValue);
+const renderUrlDimensionLabel = ({ dimensionValue }: DimensionTableRow, onSelect?: () => void) => {
+	const url = tryParseUrl(dimensionValue);
+	const path = formatPath(url) || "(unknown page)";
 
 	return (
 		<>
 			<LinkIcon size={16} />
-			<DimensionValueButton onSelect={onSelect}>{formatPath(url)}</DimensionValueButton>
-			<ExternalLink href={getHref(url)} label={value.dimensionValue} />
+			<DimensionValueButton onSelect={dimensionValue ? onSelect : undefined}>{path}</DimensionValueButton>
+			{dimensionValue && <ExternalLink href={getHref(url)} label={dimensionValue} />}
 			{typeof url !== "string" && <span className={styles.hostname}>{formatHost(url)}</span>}
 		</>
 	);
@@ -225,20 +260,14 @@ const screenWidthRanges: Record<string, [number, number]> = {
 	"2xl": [1536, Number.POSITIVE_INFINITY],
 };
 
-const formatScreenWidth = (value: string) => {
-	const key = value.toLowerCase();
-	const range = screenWidthRanges[key];
+const screenWidthIcons = new Map([
+	["xs", SmartphoneIcon],
+	["sm", SmartphoneIcon],
+	["md", TabletIcon],
+	["lg", LaptopIcon],
+]);
 
-	if (!range) {
-		return value;
-	}
-
-	const [min, max] = range;
-	const upper = Number.isFinite(max) ? `${max}px` : "∞";
-	return `${key.toUpperCase()} (${min}px to ${upper})`;
-};
-
-const dimensionLabels: Record<Dimension, (value: DimensionTableRow, onSelect: () => void) => React.ReactNode> = {
+const dimensionLabels: Record<Dimension, (value: DimensionTableRow, onSelect?: () => void) => React.ReactNode> = {
 	utm_campaign: renderUtmDimensionLabel,
 	utm_content: renderUtmDimensionLabel,
 	utm_medium: renderUtmDimensionLabel,
@@ -279,7 +308,7 @@ const dimensionLabels: Record<Dimension, (value: DimensionTableRow, onSelect: ()
 	),
 	country: (value, onSelect) => (
 		<>
-			<span>{countryCodeToFlag(value.dimensionValue)}</span>
+			<CountryFlag code={value.dimensionValue} />
 			<DimensionValueButton onSelect={onSelect}>
 				{value.displayName || value.dimensionValue || "Unknown"}
 			</DimensionValueButton>
@@ -287,7 +316,7 @@ const dimensionLabels: Record<Dimension, (value: DimensionTableRow, onSelect: ()
 	),
 	city: (value, onSelect) => (
 		<>
-			<span>{countryCodeToFlag(value.icon || "XX")}</span>
+			<CountryFlag code={value.icon} />
 			<DimensionValueButton onSelect={onSelect}>{value.displayName || "Unknown"}</DimensionValueButton>
 		</>
 	),
@@ -321,14 +350,24 @@ const dimensionLabels: Record<Dimension, (value: DimensionTableRow, onSelect: ()
 			<DimensionValueButton onSelect={onSelect}>{value.dimensionValue}</DimensionValueButton>
 		</>
 	),
-	screen_width: (value, onSelect) => (
-		<>
-			<MonitorIcon size={16} />
-			<DimensionValueButton onSelect={onSelect}>
-				{value.dimensionValue ? formatScreenWidth(value.dimensionValue) : "Unknown"}
-			</DimensionValueButton>
-		</>
-	),
+	screen_width: (value, onSelect) => {
+		const key = value.dimensionValue.toLowerCase();
+		const Icon = screenWidthIcons.get(key) ?? MonitorIcon;
+		const range = Object.hasOwn(screenWidthRanges, key) ? screenWidthRanges[key] : undefined;
+		return (
+			<>
+				<Icon size={16} aria-hidden="true" />
+				<DimensionValueButton onSelect={onSelect}>
+					{range ? key.toUpperCase() : value.dimensionValue || "Unknown"}
+				</DimensionValueButton>
+				{range && (
+					<span className={styles.screenWidthRange}>
+						({range[0]}px to {Number.isFinite(range[1]) ? `${range[1]}px` : "∞"})
+					</span>
+				)}
+			</>
+		);
+	},
 	orientation: (value, onSelect) => (
 		<>
 			<OrientationIcon orientation={value.dimensionValue} size={24} />
@@ -357,14 +396,28 @@ export const DimensionRow = ({
 	query,
 	onSelect,
 	onOpen,
-}: DimensionProps & { row: DimensionTableRow; biggest: number }) => (
-	<div className={styles.dimensionRow}>
+}: Pick<DimensionProps, "dimension" | "propertyKey" | "onOpen"> & {
+	row: ComparisonRow;
+	biggest: number;
+	query: Pick<ProjectQuery, "filters" | "metric">;
+	onSelect?: DimensionProps["onSelect"];
+}) => (
+	<div
+		className={styles.dimensionRow}
+		title={
+			row.comparisonValue === undefined
+				? undefined
+				: `Comparison: ${formatMetricVal(row.comparisonValue, query.metric)}`
+		}
+	>
 		<DimensionValueBar
 			value={row.value}
+			comparisonValue={row.comparisonValue}
 			biggest={biggest}
+			metric={query.metric}
 			selected={isSelected(query, dimension, row.dimensionValue, propertyKey)}
 		>
-			{dimensionLabels[dimension](row, () => onSelect(row))}
+			{dimensionLabels[dimension](row, onSelect && (() => onSelect(row)))}
 			{onOpen && (
 				<button
 					type="button"
@@ -377,31 +430,53 @@ export const DimensionRow = ({
 				</button>
 			)}
 		</DimensionValueBar>
-		<div>{formatMetricVal(row.value, query.metric)}</div>
+		<DimensionMetricValue value={row.value} comparisonValue={row.comparisonValue} metric={query.metric} />
 	</div>
 );
 
 export const DimensionValueBar = ({
 	value,
 	biggest,
+	metric,
 	children,
 	selected = false,
+	comparisonValue,
 }: {
 	value?: number | null;
 	biggest: number;
+	metric: Metric;
 	children?: React.ReactNode;
 	selected?: boolean;
-}) => (
-	<div
-		className={cls(styles.percentage, selected && styles.selected)}
-		data-empty={(value ?? 0) <= 0}
-		style={{ "--percentage": `${biggest > 0 ? ((value ?? 0) / biggest) * 100 : 0}%` } as React.CSSProperties}
-	>
-		{children}
-	</div>
-);
+	comparisonValue?: number | null;
+}) => {
+	const hasChange = value != null && comparisonValue != null && value !== comparisonValue;
+	const end = hasChange ? Math.max(value, comparisonValue) : (value ?? 0);
+	const overlap = hasChange && end > 0 ? Math.min(value, comparisonValue) / end : 1;
+	const changeIsGood = hasChange && isMetricImprovement(value - comparisonValue, metric);
 
-export const isSelected = (query: ProjectQuery, dimension: Dimension, value: string, propertyKey?: string) => {
+	return (
+		<div
+			className={cls(styles.percentage, selected && styles.selected)}
+			data-empty={end <= 0}
+			data-change={hasChange ? (changeIsGood ? "better" : "worse") : undefined}
+			style={
+				{
+					"--percentage": `${biggest > 0 ? (end / biggest) * 100 : 0}%`,
+					"--overlap": `${overlap * 100}%`,
+				} as React.CSSProperties
+			}
+		>
+			{children}
+		</div>
+	);
+};
+
+export const isSelected = (
+	query: Pick<ProjectQuery, "filters">,
+	dimension: Dimension,
+	value: string,
+	propertyKey?: string,
+) => {
 	// in the property key list, a key is active while any filter uses it
 	if (dimension === "property" && propertyKey === undefined) {
 		return query.filters.some((filter) => filter.dimension === "property" && filter.key === value);

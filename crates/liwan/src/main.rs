@@ -18,8 +18,8 @@ async fn main() -> Result<()> {
     setup_logger(args.log_level)?;
 
     let config = Config::load(args.config, std::env::vars())?;
-    let (events_tx, events_rx) = tokio::sync::mpsc::channel::<Event>(1024 * 10);
-    let (exits_tx, exits_rx) = tokio::sync::mpsc::channel::<EventExit>(1024 * 10);
+    let (events_tx, events_rx) = tokio::sync::mpsc::channel::<Event>(10240);
+    let (exits_tx, exits_rx) = tokio::sync::mpsc::channel::<EventExit>(10240);
     let queues = web::EventQueues { events: events_tx, exits: exits_tx };
 
     if let Some(cmd) = args.cmd {
@@ -28,6 +28,34 @@ async fn main() -> Result<()> {
 
     let app = Liwan::try_new(config)?;
     app.run_background_tasks();
+
+    let interval = std::time::Duration::try_from(
+        app.config.duckdb.checkpoint_interval.to_duration(jiff::SpanRelativeTo::days_are_24_hours())?,
+    )?;
+    let (stop_checkpoints, mut checkpoint_shutdown) = tokio::sync::oneshot::channel::<()>();
+    let checkpoints = (!interval.is_zero()).then(|| {
+        let app = app.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = &mut checkpoint_shutdown => break,
+                    _ = tokio::time::sleep(interval) => {}
+                }
+                let app = app.clone();
+                match tokio::task::spawn_blocking(move || -> Result<()> {
+                    app.events_conn()?.execute_batch("CHECKPOINT")?;
+                    Ok(())
+                })
+                .await
+                {
+                    Ok(Ok(())) => tracing::debug!("Completed periodic DuckDB checkpoint"),
+                    Ok(Err(err)) => tracing::warn!(%err, "Periodic DuckDB checkpoint failed"),
+                    Err(err) => tracing::error!(%err, "Periodic DuckDB checkpoint task failed"),
+                }
+            }
+        })
+    });
 
     let server = web::start_webserver(app.clone(), queues);
     let event_processor = app.events.process_events(events_rx);
@@ -42,8 +70,12 @@ async fn main() -> Result<()> {
     };
 
     // The stopped server has dropped its senders. Drain every event it accepted before checkpointing.
+    drop(stop_checkpoints);
     event_processor.await?;
     exit_processor.await?;
+    if let Some(checkpoints) = checkpoints {
+        checkpoints.await?;
+    }
     app.shutdown()
 }
 

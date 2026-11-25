@@ -1,6 +1,6 @@
 mod common;
 use anyhow::Result;
-use chrono::{Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
 use serde_json::json;
 
 fn admin_headers(cookies: &[axum_extra::extract::cookie::Cookie<'static>]) -> Vec<(String, String)> {
@@ -245,7 +245,7 @@ async fn summary_counts_pageviews_and_visitors_per_tag() -> Result<()> {
     app.seed_database(0)?;
     let headers = admin_headers(&common::login(&client, "admin", "admin").await);
     let path = "/api/dashboard/project/public-project/utm-tags";
-    let time = "2026-01-01T12:00:00Z".parse::<chrono::DateTime<Utc>>()?;
+    let time = "2026-01-01T12:00:00Z".parse::<Timestamp>()?;
     for (visitor, event, source, medium, campaign) in [
         ("visitor-1", "pageview", Some("google"), Some("cpc"), Some("summer_sale")),
         ("visitor-2", "pageview", Some("google"), Some("cpc"), Some("summer_sale")),
@@ -258,11 +258,11 @@ async fn summary_counts_pageviews_and_visitors_per_tag() -> Result<()> {
         // Outside the reported range.
         ("visitor-5", "pageview", Some("google"), Some("cpc"), Some("summer_sale")),
     ] {
-        let created_at = if visitor == "visitor-5" { time - Duration::days(5) } else { time };
+        let created_at = if visitor == "visitor-5" { time - SignedDuration::from_hours(120) } else { time };
         app.events_conn()?.execute(
             "insert into events (entity_id, visitor_group_id, event, created_at, utm_source, utm_medium, utm_campaign)
              values ('entity-1', ?, ?, ?, ?, ?, ?)",
-            duckdb::params![visitor, event, created_at, source, medium, campaign],
+            duckdb::params![visitor, event, created_at.to_string(), source, medium, campaign],
         )?;
     }
 

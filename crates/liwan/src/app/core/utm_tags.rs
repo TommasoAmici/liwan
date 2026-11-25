@@ -1,9 +1,10 @@
 use anyhow::{Result, bail};
-use chrono::Utc;
+use jiff::Timestamp;
 use rand::distr::{Alphanumeric, SampleString};
 use rusqlite::OptionalExtension;
 
 use crate::app::{SqlitePool, models::UtmTag};
+use crate::utils::timestamp::SqlTimestamp;
 
 const MAX_NAME_CHARS: usize = 100;
 const MAX_URL_BYTES: usize = 2048;
@@ -58,7 +59,7 @@ impl LiwanUtmTags {
     pub fn create(&self, project_id: &str, input: &UtmTagInput) -> Result<UtmTag> {
         let input = validate_utm_tag(input.clone())?;
         let id = Alphanumeric.sample_string(&mut rand::rng(), 16);
-        let now = Utc::now();
+        let now = Timestamp::now();
         self.pool.get()?.execute(
             "insert into project_utm_tags
                 (id, project_id, display_name, url, utm_source, utm_medium, utm_campaign, utm_content, utm_term, created_at, updated_at)
@@ -73,8 +74,8 @@ impl LiwanUtmTags {
                 input.utm_campaign,
                 input.utm_content,
                 input.utm_term,
-                now,
-                now,
+                SqlTimestamp(now),
+                SqlTimestamp(now),
             ],
         )?;
         Ok(input.into_tag(id, project_id.to_string()))
@@ -96,7 +97,7 @@ impl LiwanUtmTags {
                 input.utm_campaign,
                 input.utm_content,
                 input.utm_term,
-                Utc::now(),
+                SqlTimestamp(Timestamp::now()),
                 project_id,
                 tag_id,
             ],

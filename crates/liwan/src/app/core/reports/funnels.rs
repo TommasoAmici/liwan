@@ -139,8 +139,9 @@ mod tests {
     use crate::app::models::FilterType;
     use crate::app::reports::Dimension;
     use crate::config::Config;
-    use chrono::{DateTime, Duration, Utc};
+    use crate::utils::timestamp::SqlTimestamp;
     use duckdb::params;
+    use jiff::{SignedDuration, Timestamp};
 
     fn step_page(path: &str, match_type: FunnelMatch) -> FunnelStep {
         FunnelStep::Page { path: path.into(), match_type }
@@ -150,12 +151,12 @@ mod tests {
         FunnelStep::Event { name: name.into() }
     }
 
-    fn base() -> DateTime<Utc> {
-        DateTime::from_timestamp(1_700_000_000, 0).unwrap()
+    fn base() -> Timestamp {
+        Timestamp::from_second(1_700_000_000).unwrap()
     }
 
-    fn range(base: DateTime<Utc>) -> DateRange {
-        DateRange { start: base - Duration::hours(1), end: base + Duration::hours(24) }
+    fn range(base: Timestamp) -> DateRange {
+        DateRange { start: base - SignedDuration::from_hours(1), end: base + SignedDuration::from_hours(24) }
     }
 
     fn filter(dimension: Dimension, value: &str) -> DimensionFilter {
@@ -169,19 +170,19 @@ mod tests {
         }
     }
 
-    fn insert(conn: &DuckDBConn, entity: &str, visitor: &str, event: &str, path: &str, time: DateTime<Utc>) {
+    fn insert(conn: &DuckDBConn, entity: &str, visitor: &str, event: &str, path: &str, time: Timestamp) {
         conn.execute(
             "insert into events (entity_id, visitor_group_id, event, created_at, path) values (?, ?, ?, ?, ?)",
-            params![entity, visitor, event, time, path],
+            params![entity, visitor, event, SqlTimestamp(time), path],
         )
         .unwrap();
     }
 
-    fn page(conn: &DuckDBConn, visitor: &str, path: &str, time: DateTime<Utc>) {
+    fn page(conn: &DuckDBConn, visitor: &str, path: &str, time: Timestamp) {
         insert(conn, "a", visitor, "pageview", path, time);
     }
 
-    fn event(conn: &DuckDBConn, visitor: &str, name: &str, time: DateTime<Utc>) {
+    fn event(conn: &DuckDBConn, visitor: &str, name: &str, time: Timestamp) {
         insert(conn, "a", visitor, name, "/ignored", time);
     }
 
@@ -205,16 +206,16 @@ mod tests {
         let base = base();
         // Completes every step.
         page(&conn, "one", "/pricing", base);
-        event(&conn, "one", "signup", base + Duration::minutes(1));
-        event(&conn, "one", "purchase", base + Duration::minutes(2));
+        event(&conn, "one", "signup", base + SignedDuration::from_mins(1));
+        event(&conn, "one", "purchase", base + SignedDuration::from_mins(2));
         // Stops at step 2.
-        page(&conn, "two", "/pricing", base + Duration::hours(1));
-        event(&conn, "two", "signup", base + Duration::hours(1) + Duration::minutes(1));
+        page(&conn, "two", "/pricing", base + SignedDuration::from_hours(1));
+        event(&conn, "two", "signup", base + SignedDuration::from_hours(1) + SignedDuration::from_mins(1));
         // Stops at step 1.
-        page(&conn, "three", "/pricing", base + Duration::hours(2));
+        page(&conn, "three", "/pricing", base + SignedDuration::from_hours(2));
         // Never matches step 1.
-        event(&conn, "four", "signup", base + Duration::hours(3));
-        event(&conn, "four", "purchase", base + Duration::hours(3) + Duration::minutes(1));
+        event(&conn, "four", "signup", base + SignedDuration::from_hours(3));
+        event(&conn, "four", "purchase", base + SignedDuration::from_hours(3) + SignedDuration::from_mins(1));
 
         let steps = [step_page("/pricing", FunnelMatch::Equal), step_event("signup"), step_event("purchase")];
         assert_eq!(counts(&conn, &steps, &[range(base)], &[]), vec![vec![3, 2, 1]]);
@@ -226,9 +227,9 @@ mod tests {
         let conn = app.events_conn().unwrap();
         let base = base();
         event(&conn, "one", "purchase", base);
-        event(&conn, "one", "signup", base + Duration::minutes(1));
-        page(&conn, "one", "/pricing", base + Duration::minutes(2));
-        event(&conn, "one", "signup", base + Duration::minutes(3));
+        event(&conn, "one", "signup", base + SignedDuration::from_mins(1));
+        page(&conn, "one", "/pricing", base + SignedDuration::from_mins(2));
+        event(&conn, "one", "signup", base + SignedDuration::from_mins(3));
 
         let steps = [step_page("/pricing", FunnelMatch::Equal), step_event("signup"), step_event("purchase")];
         assert_eq!(counts(&conn, &steps, &[range(base)], &[]), vec![vec![1, 1, 0]]);
@@ -243,10 +244,10 @@ mod tests {
         let conn = app.events_conn().unwrap();
         let base = base();
         page(&conn, "one", "/pricing", base);
-        page(&conn, "one", "/pricing", base + Duration::minutes(1));
-        page(&conn, "one", "/pricing", base + Duration::minutes(2));
-        event(&conn, "one", "signup", base + Duration::minutes(3));
-        event(&conn, "one", "signup", base + Duration::minutes(4));
+        page(&conn, "one", "/pricing", base + SignedDuration::from_mins(1));
+        page(&conn, "one", "/pricing", base + SignedDuration::from_mins(2));
+        event(&conn, "one", "signup", base + SignedDuration::from_mins(3));
+        event(&conn, "one", "signup", base + SignedDuration::from_mins(4));
 
         let steps = [step_page("/pricing", FunnelMatch::Equal), step_event("signup")];
         assert_eq!(counts(&conn, &steps, &[range(base)], &[]), vec![vec![1, 1]]);
@@ -274,7 +275,7 @@ mod tests {
         let steps = [step_page("/", FunnelMatch::Contains), step_page("/pricing", FunnelMatch::Equal)];
         assert_eq!(counts(&conn, &steps, &[range(base)], &[]), vec![vec![1, 0]]);
 
-        page(&conn, "one", "/pricing", base + Duration::minutes(1));
+        page(&conn, "one", "/pricing", base + SignedDuration::from_mins(1));
         assert_eq!(counts(&conn, &steps, &[range(base)], &[]), vec![vec![1, 1]]);
     }
 
@@ -284,15 +285,15 @@ mod tests {
         let conn = app.events_conn().unwrap();
         let base = base();
         page(&conn, "one", "/pricing", base);
-        event(&conn, "one", "signup", base + Duration::minutes(1));
-        page(&conn, "two", "/pricing", base + Duration::days(1));
-        event(&conn, "two", "signup", base + Duration::days(1) + Duration::minutes(1));
-        event(&conn, "two", "purchase", base + Duration::days(1) + Duration::minutes(2));
+        event(&conn, "one", "signup", base + SignedDuration::from_mins(1));
+        page(&conn, "two", "/pricing", base + SignedDuration::from_hours(24));
+        event(&conn, "two", "signup", base + SignedDuration::from_hours(24) + SignedDuration::from_mins(1));
+        event(&conn, "two", "purchase", base + SignedDuration::from_hours(24) + SignedDuration::from_mins(2));
 
         let steps = [step_page("/pricing", FunnelMatch::Equal), step_event("signup")];
         let ranges = [
-            DateRange { start: base - Duration::hours(1), end: base + Duration::hours(1) },
-            DateRange { start: base + Duration::hours(23), end: base + Duration::days(2) },
+            DateRange { start: base - SignedDuration::from_hours(1), end: base + SignedDuration::from_hours(1) },
+            DateRange { start: base + SignedDuration::from_hours(23), end: base + SignedDuration::from_hours(48) },
         ];
         assert_eq!(counts(&conn, &steps, &ranges, &[]), vec![vec![1, 1], vec![1, 1]]);
         // The response follows the request order, not the range order.
@@ -304,10 +305,10 @@ mod tests {
         let app = Liwan::new_memory(Config::default()).unwrap();
         let conn = app.events_conn().unwrap();
         let base = base();
-        page(&conn, "one", "/pricing", base - Duration::days(1));
+        page(&conn, "one", "/pricing", base - SignedDuration::from_hours(24));
         event(&conn, "one", "signup", base);
         page(&conn, "two", "/pricing", base);
-        event(&conn, "two", "signup", base + Duration::days(1));
+        event(&conn, "two", "signup", base + SignedDuration::from_hours(24));
 
         let steps = [step_page("/pricing", FunnelMatch::Equal), step_event("signup")];
         assert_eq!(counts(&conn, &steps, &[range(base)], &[]), vec![vec![1, 0]]);
@@ -322,11 +323,18 @@ mod tests {
         insert(&conn, "a", "one", "pageview", "/pricing", base);
         conn.execute("update events set country = 'US' where visitor_group_id = 'one' and event = 'pageview'", [])
             .unwrap();
-        insert(&conn, "a", "one", "signup", "/ignored", base + Duration::minutes(1));
+        insert(&conn, "a", "one", "signup", "/ignored", base + SignedDuration::from_mins(1));
         conn.execute("update events set country = 'DE' where event = 'signup'", []).unwrap();
         // Every event of this group is in the US.
-        insert(&conn, "a", "two", "pageview", "/pricing", base + Duration::hours(1));
-        insert(&conn, "a", "two", "signup", "/ignored", base + Duration::hours(1) + Duration::minutes(1));
+        insert(&conn, "a", "two", "pageview", "/pricing", base + SignedDuration::from_hours(1));
+        insert(
+            &conn,
+            "a",
+            "two",
+            "signup",
+            "/ignored",
+            base + SignedDuration::from_hours(1) + SignedDuration::from_mins(1),
+        );
         conn.execute("update events set country = 'US' where visitor_group_id = 'two'", []).unwrap();
 
         let steps = [step_page("/pricing", FunnelMatch::Equal), step_event("signup")];
@@ -341,14 +349,14 @@ mod tests {
         let conn = app.events_conn().unwrap();
         let base = base();
         page(&conn, "one", "/pricing", base);
-        event(&conn, "one", "signup", base + Duration::minutes(1));
+        event(&conn, "one", "signup", base + SignedDuration::from_mins(1));
         page(&conn, "two", "/products/item", base);
-        event(&conn, "two", "signup", base + Duration::minutes(1));
+        event(&conn, "two", "signup", base + SignedDuration::from_mins(1));
         page(&conn, "three", "/blog/post", base);
-        event(&conn, "three", "signup", base + Duration::minutes(1));
+        event(&conn, "three", "signup", base + SignedDuration::from_mins(1));
         // Matching is case-insensitive, like a dashboard filter.
         page(&conn, "four", "/PRICING", base);
-        event(&conn, "four", "signup", base + Duration::minutes(1));
+        event(&conn, "four", "signup", base + SignedDuration::from_mins(1));
 
         let after = step_event("signup");
         for (match_type, path, expected) in [
@@ -368,7 +376,7 @@ mod tests {
         let base = base();
         for (visitor, name) in [("one", "signup"), ("two", "Signup"), ("three", "signup2"), ("four", "sign up")] {
             page(&conn, visitor, "/pricing", base);
-            event(&conn, visitor, name, base + Duration::minutes(1));
+            event(&conn, visitor, name, base + SignedDuration::from_mins(1));
         }
 
         let steps = [step_page("/pricing", FunnelMatch::Equal), step_event("signup")];
@@ -385,7 +393,8 @@ mod tests {
 
         assert_eq!(funnel_report(&conn, &[], &steps, &[range(base)], &[]).unwrap().remove(0).counts, vec![0, 0, 0]);
         assert!(funnel_report(&conn, &["a".into()], &steps, &[], &[]).unwrap().is_empty());
-        let empty = DateRange { start: base - Duration::days(2), end: base - Duration::days(1) };
+        let empty =
+            DateRange { start: base - SignedDuration::from_hours(48), end: base - SignedDuration::from_hours(24) };
         assert_eq!(funnel_report(&conn, &["a".into()], &steps, &[empty], &[]).unwrap().remove(0).counts, vec![0, 0, 0]);
     }
 }

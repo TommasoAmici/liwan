@@ -1,17 +1,29 @@
 use crate::app::DuckDBConn;
 use crate::config::LimitsConfig;
 use crate::utils::duckdb::{ParamVec, repeat_vars};
+use crate::utils::timestamp::SqlTimestamp;
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use duckdb::params_from_iter;
+use jiff::Timestamp;
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use super::shared::{
     build_filter_clause, metric_aggregate_sql, metric_sample_count_sql, range_events_sql, report_columns,
 };
 use super::{DateRange, DimensionFilter, Metric, ReportStats};
 
+const LIVE_VISITOR_WINDOW_SQL: &str = "interval '5 minutes'";
+
+/// Active visitor groups by their most recently viewed page.
+#[derive(Serialize, JsonSchema)]
+pub struct CurrentVisitorPage {
+    pub page: String,
+    pub visitors: u64,
+}
+
 /// Return the earliest event timestamp for the selected entities
-pub fn earliest_timestamp(conn: &DuckDBConn, entities: &[String]) -> Result<Option<DateTime<Utc>>> {
+pub fn earliest_timestamp(conn: &DuckDBConn, entities: &[String]) -> Result<Option<Timestamp>> {
     if entities.is_empty() {
         return Ok(None);
     }
@@ -26,11 +38,61 @@ pub fn earliest_timestamp(conn: &DuckDBConn, entities: &[String]) -> Result<Opti
     );
 
     let mut stmt = conn.prepare_cached(&query)?;
-    let earliest_timestamp = stmt.query_row(params_from_iter(entities), |row| row.get(0))?;
-    Ok(earliest_timestamp)
+    let earliest_timestamp = stmt.query_row(params_from_iter(entities), |row| row.get::<_, Option<SqlTimestamp>>(0))?;
+    Ok(earliest_timestamp.map(|timestamp| timestamp.0))
 }
 
-/// Build all range summaries and the live visitor count in one query.
+/// Count visitor groups with pageviews in the last five minutes.
+pub fn online_users(conn: &DuckDBConn, entities: &[String]) -> Result<u64> {
+    if entities.is_empty() {
+        return Ok(0);
+    }
+
+    let vars = repeat_vars(entities.len());
+    let query = format!(
+        "--sql
+			select count(distinct e.visitor_group_id)
+			from events e
+			where
+				e.event = 'pageview' and e.entity_id in ({vars}) and
+				e.created_at between make_timestamp(epoch_us(now())) - {LIVE_VISITOR_WINDOW_SQL}
+					and make_timestamp(epoch_us(now()));
+	"
+    );
+
+    let mut stmt = conn.prepare_cached(&query)?;
+    let online_users = stmt.query_row(params_from_iter(entities), |row| row.get(0))?;
+    Ok(online_users)
+}
+
+/// List the last page viewed by each active visitor group, ordered by visitor count.
+pub fn online_users_by_page(conn: &DuckDBConn, entities: &[String]) -> Result<Vec<CurrentVisitorPage>> {
+    if entities.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let vars = repeat_vars(entities.len());
+    let query = format!(
+        "select page, count(*) as visitors
+         from (
+             select concat(fqdn, path) as page
+             from events
+             where event = 'pageview' and entity_id in ({vars})
+                 and created_at between make_timestamp(epoch_us(now())) - {LIVE_VISITOR_WINDOW_SQL}
+                     and make_timestamp(epoch_us(now()))
+             qualify row_number() over (partition by visitor_group_id order by created_at desc, rowid desc) = 1
+         )
+         group by page
+         order by visitors desc, page"
+    );
+    let mut stmt = conn.prepare_cached(&query)?;
+    let pages = stmt.query_map(params_from_iter(entities), |row| {
+        Ok(CurrentVisitorPage { page: row.get(0)?, visitors: row.get(1)? })
+    })?;
+    Ok(pages.collect::<duckdb::Result<_>>()?)
+}
+
+/// Build all range summaries in one query.
 pub fn overall_stats(
     conn: &DuckDBConn,
     entities: &[String],
@@ -38,9 +100,9 @@ pub fn overall_stats(
     ranges: &[DateRange],
     filters: &[DimensionFilter],
     limits: &LimitsConfig,
-) -> Result<(Vec<ReportStats>, u64)> {
+) -> Result<Vec<ReportStats>> {
     if entities.is_empty() || ranges.is_empty() {
-        return Ok((vec![ReportStats::default(); ranges.len()], 0));
+        return Ok(vec![ReportStats::default(); ranges.len()]);
     }
 
     let entity_vars = repeat_vars(entities.len());
@@ -78,7 +140,6 @@ pub fn overall_stats(
     params.push(event);
     params.extend(entities);
     params.extend_from_params(filters_params);
-    params.extend(entities);
 
     let query = format!(
         "--sql
@@ -108,21 +169,13 @@ pub fn overall_stats(
 					{time_samples} as time_samples
 				from session_data sd
 				group by range_idx
-			),
-			online as (
-				select count(distinct visitor_group_id) as current_visitors
-				from events
-				where event = 'pageview' and entity_id in ({entity_vars})
-					and created_at >= (now()::timestamp - interval '5 minutes')
 			)
 		select
 			coalesce(s.total_views, 0), coalesce(s.unique_visitors, 0),
 			s.bounce_rate, s.avg_time_on_site,
-			coalesce(s.bounce_samples, 0), coalesce(s.time_samples, 0),
-			online.current_visitors
+			coalesce(s.bounce_samples, 0), coalesce(s.time_samples, 0)
 		from range({range_count}) r(range_idx)
 		left join range_stats s using (range_idx)
-		cross join online
 		order by r.range_idx;
 	"
     );
@@ -130,7 +183,6 @@ pub fn overall_stats(
     let mut stmt = conn.prepare_cached(&query)?;
     let mut rows = stmt.query(duckdb::params_from_iter(params))?;
     let mut reports = Vec::with_capacity(ranges.len());
-    let mut current_visitors = 0;
     while let Some(row) = rows.next()? {
         let mut stats = ReportStats {
             total_views: row.get(0)?,
@@ -152,9 +204,8 @@ pub fn overall_stats(
             stats.avg_time_on_site = None;
         }
         reports.push(stats);
-        current_visitors = row.get(6)?;
     }
-    Ok((reports, current_visitors))
+    Ok(reports)
 }
 
 #[cfg(test)]
@@ -162,41 +213,23 @@ mod tests {
     use super::*;
     use crate::app::Liwan;
     use crate::config::Config;
-    use chrono::Duration;
-
-    #[test]
-    fn overall_stats_counts_only_pageviews_as_current_visitors() {
-        let app = Liwan::new_memory(Config::default()).unwrap();
-        let conn = app.events_conn().unwrap();
-        for (visitor, event) in [("visitor-1", "pageview"), ("visitor-2", "signup")] {
-            conn.execute(
-                "insert into events (entity_id, visitor_group_id, event, created_at) values (?, ?, ?, ?)",
-                duckdb::params!["entity-1", visitor, event, Utc::now()],
-            )
-            .unwrap();
-        }
-
-        let now = Utc::now();
-        let ranges = [DateRange { start: now - Duration::days(2), end: now - Duration::days(1) }];
-        let (stats, current_visitors) =
-            overall_stats(&conn, &["entity-1".into()], "signup", &ranges, &[], &LimitsConfig::default()).unwrap();
-        assert_eq!(stats[0].total_views, 0);
-        assert_eq!(current_visitors, 1);
-    }
 
     #[test]
     fn overall_stats_uses_terminal_event_exit_duration() {
         let app = Liwan::new_memory(Config::default()).expect("failed to create app");
-        let created_at = Utc::now() - Duration::minutes(5);
-        let exited_at = created_at + Duration::seconds(90);
+        let created_at = Timestamp::now() - jiff::SignedDuration::from_mins(5);
+        let exited_at = created_at + jiff::SignedDuration::from_secs(90);
         let conn = app.events_conn().expect("failed to get event connection");
         conn.execute(
             "insert into events (entity_id, visitor_group_id, event, created_at, fqdn, path, exited_at) values (?, ?, ?, ?, ?, ?, ?)",
-            duckdb::params!["entity-1", "visitor-1", "pageview", created_at, "example.com", "/", exited_at],
+            duckdb::params!["entity-1", "visitor-1", "pageview", SqlTimestamp(created_at), "example.com", "/", SqlTimestamp(exited_at)],
         )
         .expect("failed to insert event");
 
-        let range = DateRange { start: created_at - Duration::minutes(1), end: exited_at + Duration::minutes(1) };
+        let range = DateRange {
+            start: created_at - jiff::SignedDuration::from_mins(1),
+            end: exited_at + jiff::SignedDuration::from_mins(1),
+        };
         let ranges = [range];
         let limits = LimitsConfig {
             report_min_bounce_rate_sessions: 0,
@@ -205,7 +238,6 @@ mod tests {
         };
         let stats = overall_stats(&conn, &["entity-1".to_string()], "pageview", &ranges, &[], &limits)
             .expect("failed to build stats")
-            .0
             .remove(0);
 
         assert_eq!(stats.avg_time_on_site, Some(90.0));
@@ -217,16 +249,29 @@ mod tests {
         };
         let stats = overall_stats(&conn, &["entity-1".to_string()], "pageview", &ranges, &[], &limits)
             .expect("failed to build stats with separate limits")
-            .0
             .remove(0);
         assert_eq!(stats.bounce_rate, Some(1.0));
         assert_eq!(stats.avg_time_on_site, None);
 
         let stats = overall_stats(&conn, &["entity-1".to_string()], "pageview", &ranges, &[], &LimitsConfig::default())
             .expect("failed to build stats with default limits")
-            .0
             .remove(0);
         assert_eq!(stats.bounce_rate, None);
         assert_eq!(stats.avg_time_on_site, None);
+    }
+
+    #[test]
+    fn online_users_counts_only_pageviews_as_current_visitors() {
+        let app = Liwan::new_memory(Config::default()).unwrap();
+        let conn = app.events_conn().unwrap();
+        for (visitor, event) in [("visitor-1", "pageview"), ("visitor-2", "signup")] {
+            conn.execute(
+                "insert into events (entity_id, visitor_group_id, event, created_at) values (?, ?, ?, ?)",
+                duckdb::params!["entity-1", visitor, event, SqlTimestamp(Timestamp::now())],
+            )
+            .unwrap();
+        }
+
+        assert_eq!(online_users(&conn, &["entity-1".to_string()]).unwrap(), 1);
     }
 }

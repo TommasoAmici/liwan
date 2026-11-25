@@ -5,6 +5,7 @@ use serde::Serialize;
 use crate::app::DuckDBConn;
 use crate::app::models::UtmTag;
 use crate::utils::duckdb::{ParamVec, repeat_vars};
+use crate::utils::timestamp::SqlTimestamp;
 
 use super::DateRange;
 
@@ -40,8 +41,8 @@ pub fn utm_tag_summary(
     let mut params = ParamVec::new();
     // Text order: the two range bounds, then five values per tag, then the event
     // and the project's entity ids.
-    params.push(range.start);
-    params.push(range.end);
+    params.push(SqlTimestamp(range.start));
+    params.push(SqlTimestamp(range.end));
     let value_rows = (0..tags.len())
         .map(|index| format!("({index}, ?::varchar, ?::varchar, ?::varchar, ?::varchar, ?::varchar)"))
         .collect::<Vec<_>>()
@@ -110,7 +111,7 @@ mod tests {
     use crate::app::models::{FilterType, UtmTag};
     use crate::app::reports::{Dimension, DimensionFilter, overall_stats};
     use crate::config::{Config, LimitsConfig};
-    use chrono::{Duration, Utc};
+    use jiff::{SignedDuration, Timestamp};
 
     fn tag(id: &str, source: Option<&str>, medium: Option<&str>, campaign: Option<&str>) -> UtmTag {
         UtmTag {
@@ -128,24 +129,24 @@ mod tests {
 
     type Event<'a> = (&'a str, &'a str, Option<&'a str>, Option<&'a str>, Option<&'a str>);
 
-    fn insert(conn: &DuckDBConn, time: chrono::DateTime<Utc>, (visitor, event, source, medium, campaign): Event<'_>) {
+    fn insert(conn: &DuckDBConn, time: Timestamp, (visitor, event, source, medium, campaign): Event<'_>) {
         conn.execute(
             "insert into events (entity_id, visitor_group_id, event, created_at, utm_source, utm_medium, utm_campaign)
              values ('entity-1', ?, ?, ?, ?, ?, ?)",
-            duckdb::params![visitor, event, time, source, medium, campaign],
+            duckdb::params![visitor, event, SqlTimestamp(time), source, medium, campaign],
         )
         .unwrap();
     }
 
-    fn range(time: chrono::DateTime<Utc>) -> DateRange {
-        DateRange { start: time - Duration::hours(1), end: time + Duration::hours(1) }
+    fn range(time: Timestamp) -> DateRange {
+        DateRange { start: time - SignedDuration::from_hours(1), end: time + SignedDuration::from_hours(1) }
     }
 
     #[test]
     fn matches_all_five_values_case_insensitively() {
         let app = Liwan::new_memory(Config::default()).unwrap();
         let conn = app.events_conn().unwrap();
-        let time = Utc::now();
+        let time = Timestamp::now();
         insert(&conn, time, ("v1", "pageview", Some("google"), Some("cpc"), Some("summer_sale")));
         insert(&conn, time, ("v2", "pageview", Some("Google"), Some("CPC"), Some("SUMMER_SALE")));
         insert(&conn, time, ("v1", "pageview", Some("google"), Some("cpc"), Some("summer_sale")));
@@ -160,7 +161,7 @@ mod tests {
     fn a_partial_tag_matches_every_other_value() {
         let app = Liwan::new_memory(Config::default()).unwrap();
         let conn = app.events_conn().unwrap();
-        let time = Utc::now();
+        let time = Timestamp::now();
         insert(&conn, time, ("v1", "pageview", Some("google"), Some("cpc"), Some("summer_sale")));
         insert(&conn, time, ("v2", "pageview", Some("google"), Some("organic"), None));
         insert(&conn, time, ("v3", "pageview", Some("newsletter"), None, None));
@@ -174,7 +175,7 @@ mod tests {
     fn tags_without_traffic_keep_a_zeroed_row() {
         let app = Liwan::new_memory(Config::default()).unwrap();
         let conn = app.events_conn().unwrap();
-        let time = Utc::now();
+        let time = Timestamp::now();
         insert(&conn, time, ("v1", "pageview", Some("google"), None, None));
 
         let tags = [tag("none", Some("missing"), None, None), tag("some", Some("google"), None, None)];
@@ -192,7 +193,7 @@ mod tests {
     fn overlapping_tags_each_count_the_traffic_they_match() {
         let app = Liwan::new_memory(Config::default()).unwrap();
         let conn = app.events_conn().unwrap();
-        let time = Utc::now();
+        let time = Timestamp::now();
         insert(&conn, time, ("v1", "pageview", Some("google"), Some("cpc"), Some("summer_sale")));
         insert(&conn, time, ("v2", "pageview", Some("google"), Some("cpc"), Some("winter_sale")));
         insert(&conn, time, ("v3", "pageview", Some("newsletter"), Some("email"), Some("summer_sale")));
@@ -212,13 +213,13 @@ mod tests {
     fn custom_events_and_other_entities_are_excluded() {
         let app = Liwan::new_memory(Config::default()).unwrap();
         let conn = app.events_conn().unwrap();
-        let time = Utc::now();
+        let time = Timestamp::now();
         insert(&conn, time, ("v1", "pageview", Some("google"), None, None));
         insert(&conn, time, ("v1", "signup", Some("google"), None, None));
         conn.execute(
             "insert into events (entity_id, visitor_group_id, event, created_at, utm_source)
              values ('entity-2', 'v9', 'pageview', ?, 'google')",
-            duckdb::params![time],
+            duckdb::params![SqlTimestamp(time)],
         )
         .unwrap();
 
@@ -231,7 +232,7 @@ mod tests {
     fn summary_agrees_with_the_equivalent_report_filters() {
         let app = Liwan::new_memory(Config::default()).unwrap();
         let conn = app.events_conn().unwrap();
-        let time = Utc::now();
+        let time = Timestamp::now();
         insert(&conn, time, ("v1", "pageview", Some("google"), Some("cpc"), Some("summer_sale")));
         insert(&conn, time, ("v1", "pageview", Some("google"), Some("cpc"), Some("summer_sale")));
         insert(&conn, time, ("v2", "pageview", Some("google"), Some("cpc"), Some("summer_sale")));
@@ -270,7 +271,6 @@ mod tests {
         let stats =
             overall_stats(&conn, &["entity-1".into()], "pageview", &[range(time)], &filters, &LimitsConfig::default())
                 .unwrap()
-                .0
                 .remove(0);
         assert_eq!(summary.total_views, stats.total_views);
         assert_eq!(summary.unique_visitors, stats.unique_visitors);
@@ -282,7 +282,7 @@ mod tests {
     fn empty_inputs_return_one_zeroed_row_per_tag() {
         let app = Liwan::new_memory(Config::default()).unwrap();
         let conn = app.events_conn().unwrap();
-        let time = Utc::now();
+        let time = Timestamp::now();
         let tags = [tag("one", Some("google"), None, None), tag("two", Some("newsletter"), None, None)];
         assert_eq!(utm_tag_summary(&conn, &[], &tags, &range(time)).unwrap().len(), 2);
         assert!(utm_tag_summary(&conn, &["entity-1".into()], &[], &range(time)).unwrap().is_empty());

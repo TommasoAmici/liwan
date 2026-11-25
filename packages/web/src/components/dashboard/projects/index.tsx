@@ -14,7 +14,7 @@ import { LoadingSpinner } from "@/components/ui/loading";
 import { appPath } from "@/config";
 import type { GraphInterval, Metric, ProjectResponse } from "@/constants";
 import { metricNames, metrics } from "@/constants";
-import { useMe, useProjectGraph, useProjectStats } from "@/hooks/api";
+import { useCurrentVisitors, useMe, useProjectGraph, useProjectStats } from "@/hooks/api";
 import { useMetric, useRange } from "@/hooks/persist";
 import { getUsername } from "@/utils";
 
@@ -51,7 +51,7 @@ export const Projects = () => {
 	});
 
 	const { metric, setMetric } = useMetric();
-	const { range, setRange, interval } = useRange();
+	const { range, setRange, interval, selectGraphRange, undoGraphRange } = useRange();
 	const [hiddenProjects, setHiddenProjects] = useState<string[]>([]);
 	const visibleMetrics = metrics.filter((metric) =>
 		data?.projects.some((project) => !project.hiddenMetrics.includes(metric)),
@@ -116,6 +116,8 @@ export const Projects = () => {
 								setMetric={setMetric}
 								range={range}
 								interval={interval}
+								onSelectRange={selectGraphRange}
+								onUndoRange={undoGraphRange}
 							/>
 						</Accordion.Item>
 					))}
@@ -131,14 +133,19 @@ const Project = ({
 	setMetric,
 	range,
 	interval,
+	onSelectRange,
+	onUndoRange,
 }: {
 	project: ProjectResponse;
 	metric: Metric;
 	setMetric: (value: Metric) => void;
 	range: DateRange;
 	interval: GraphInterval | "auto";
+	onSelectRange: (range: DateRange) => void;
+	onUndoRange: () => void;
 }) => {
 	const visibleMetrics = metrics.filter((metric) => !project.hiddenMetrics.includes(metric));
+	const { data: live } = useCurrentVisitors(project.id, { refetchInterval: 60_000 });
 	const reportMetric = visibleMetrics.includes(metric) ? metric : visibleMetrics[0];
 	const {
 		graph,
@@ -147,6 +154,7 @@ const Project = ({
 		displayInterval,
 		isLoading: graphLoading,
 		isUpdating: graphUpdating,
+		isError: graphError,
 	} = useProjectGraph({
 		projectId: project.id,
 		metric: reportMetric ?? "views",
@@ -169,7 +177,7 @@ const Project = ({
 		<article className={styles.project}>
 			<div className={styles.projectHeader}>
 				<div className={styles.projectTitle}>
-					<ProjectHeader project={project} stats={stats} />
+					<ProjectHeader project={project} liveCount={live?.count} />
 					<Accordion.Trigger className={styles.AccordionTrigger} aria-label={`Toggle ${project.displayName} details`}>
 						<ChevronDownIcon size={22} strokeWidth={2} color="var(--text-strong)" />
 					</Accordion.Trigger>
@@ -191,8 +199,11 @@ const Project = ({
 							metric={displayMetric}
 							isLoading={graphLoading}
 							isUpdating={graphUpdating}
+							hasError={graphError}
 							range={displayRange}
 							interval={displayInterval}
+							onSelectRange={onSelectRange}
+							onUndoRange={onUndoRange}
 						/>
 					</div>
 				</Accordion.Panel>

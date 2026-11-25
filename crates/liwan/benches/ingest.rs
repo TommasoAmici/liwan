@@ -2,8 +2,8 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
 use criterion::{BatchSize, BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
+use jiff::Timestamp;
 use liwan::app::Liwan;
 use liwan::app::models::{Event, EventExit};
 use liwan::config::Config;
@@ -56,7 +56,7 @@ fn seed_day(app: &Liwan) {
 }
 
 fn batch_events(track_sessions: bool) -> Vec<Event> {
-    let created_at = Utc::now();
+    let created_at = Timestamp::now();
     (0..BATCH_SIZE)
         .map(|visitor| Event {
             entity_id: ENTITY.to_string(),
@@ -149,7 +149,7 @@ fn bench_exits(c: &mut Criterion) {
             entity_id: ENTITY.to_string(),
             visitor_group_id: format!("exit-visitor-{visitor}"),
             event: "pageview".to_string(),
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
             fqdn: Some("example.com".to_string()),
             path: Some("/exit".to_string()),
         })

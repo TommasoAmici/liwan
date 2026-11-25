@@ -41,9 +41,7 @@ pub struct Liwan {
     pub utm_tags: LiwanUtmTags,
     pub funnels: LiwanFunnels,
 
-    #[cfg(feature = "geoip")]
     pub geoip: Arc<core::LiwanGeoIP>,
-
     pub config: Config,
 }
 
@@ -85,7 +83,6 @@ impl Liwan {
 
     fn from_pools(config: Config, conn_app: SqlitePool, conn_events: DuckDBPool) -> Result<Arc<Self>> {
         Ok(Self {
-            #[cfg(feature = "geoip")]
             geoip: core::LiwanGeoIP::try_new(config.clone())?.into(),
 
             events: LiwanEvents::try_new(conn_events.clone(), conn_app.clone(), config.visitor_group_rotation_hour)?,
@@ -129,7 +126,6 @@ impl Liwan {
                 }
             });
         }
-        #[cfg(feature = "geoip")]
         tokio::task::spawn(core::keep_updated(self.geoip.clone()));
     }
 
@@ -143,7 +139,7 @@ impl Liwan {
 #[cfg(any(debug_assertions, test))]
 impl Liwan {
     pub fn seed_database(&self, count_per_entity: usize) -> Result<()> {
-        use chrono::{Days, Utc};
+        use jiff::{SignedDuration, Timestamp};
         use models::{AccessPermission, AccessScope, ApiKeyExpiration, UserRole};
 
         let entities = vec![
@@ -174,8 +170,8 @@ impl Liwan {
             )?;
         }
 
-        let start = Utc::now().checked_sub_days(Days::new(365)).unwrap();
-        let end = Utc::now();
+        let start = Timestamp::now().checked_sub(SignedDuration::from_hours(8760)).unwrap();
+        let end = Timestamp::now();
         for (entity_id, display_name, fqdn, project_ids) in entities {
             self.entities.create(
                 &models::Entity { id: entity_id.to_string(), display_name: display_name.to_string() },

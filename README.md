@@ -25,7 +25,7 @@
 ## Features
 
 **Understand your traffic**\
-See your most-visited pages, where visitors come from, and how traffic changes over time. The dashboard updates in real time, with bot filtering enabled by default. Administrators can put the projects they follow first, and the home page follows that order.
+See your most-visited pages, where visitors come from, and how traffic changes over time. The dashboard updates in real time, with bot filtering enabled by default, and shows how many visitors are on each page right now. Compare any date range with the previous period, last week, last year, or a date you pick, and see the difference in the graphs, the summary metrics, and the breakdowns. Administrators can put the projects they follow first, and the home page follows that order.
 
 **See where visitors drop off**\
 Build funnels from pages and custom events and see how many visitor groups reach each step. When you add a custom-event step, the editor suggests the events seen in the selected range, and you can still type a name that has not appeared yet. Administrators define funnels per project, and anyone who can view the project sees the results for the selected date range and filters. Funnel counts are visitor groups, which reset once a day. Saved funnels sit in a sidebar beside the report, and on narrow screens you choose one from the Funnel menu.

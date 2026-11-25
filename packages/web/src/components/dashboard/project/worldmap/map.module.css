@@ -3,6 +3,22 @@
   pointer-events: none;
 }
 
+.tooltipHeading {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+
+  > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.tooltipContainer .mapTooltip {
+  max-width: min(16rem, calc(100vw - 1rem));
+}
+
 button.reset {
   all: unset;
   cursor: pointer;
@@ -11,6 +27,7 @@ button.reset {
   position: absolute;
   top: 0.7rem;
   left: 0.7rem;
+  z-index: 1;
   pointer-events: none;
   opacity: 0;
 
@@ -24,12 +41,15 @@ button.reset {
 }
 
 .worldmap {
+  position: relative;
   display: flex;
   flex: 1;
   overflow: hidden;
 
   > svg {
+    display: block;
     flex: 1;
+    min-inline-size: 0;
   }
 }
 
@@ -43,10 +63,6 @@ button.reset {
   outline: none;
 
   fill: hsl(200, calc(0% + 85% * var(--percent) * var(--percent)), calc(45% + 15% * var(--percent)));
-
-  &:hover {
-    opacity: 0.8;
-  }
 
   &[data-inverted="true"] {
     /* same fill, but closer to 100 means worse instead of better */

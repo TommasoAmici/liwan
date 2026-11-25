@@ -11,7 +11,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { createToast } from "@/components/ui/toast";
 import type { Funnel, ProjectResponse } from "@/constants";
 import { invalidateFunnels, useCustomEvents, useDimension } from "@/hooks/api";
-import { formatMetricVal } from "@/utils";
+import { formatMetricVal } from "../metric-format";
 import { type EditorStep, editorStepFrom, type FunnelMatchType, funnelStepFrom, matchLabels, matchTypes } from "./step";
 
 type PathSuggestion = { path: string; views: number };

@@ -1,16 +1,16 @@
 import cardStyles from "./dimensions/dimensions.module.css";
 import styles from "./index.module.css";
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
-import type { DateRange } from "@/api/ranges";
-import { LoadingSpinner } from "@/components/ui/loading";
+import { DateRange } from "@/api/ranges";
 import { getDashboardProjectId } from "@/config";
 import type { Dimension, DimensionFilter, DimensionTableRow, Metric, ProjectResponse } from "@/constants";
 import { dimensions, eventMetricName, metrics } from "@/constants";
-import { useDimension, useProject, useProjectGraph, useProjectStats } from "@/hooks/api";
+import { useCurrentVisitors, useDimension, useProject, useProjectGraph, useProjectStats } from "@/hooks/api";
 import { useMetric, useRange } from "@/hooks/persist";
 import { cls } from "@/utils";
+import { type Comparison, type ComparisonRange, getComparisonRange } from "./comparison";
 import { CustomEventsCard } from "./custom-events";
 import { DimensionDropdownCard, DimensionTabs, DimensionTabsCard, PageDimensionTabsCard } from "./dimensions";
 import { SelectFilters } from "./filter";
@@ -29,7 +29,53 @@ export type ProjectQuery = {
 	range: DateRange;
 	filters: DimensionFilter[];
 	eventName: string;
+	comparisonRange?: ComparisonRange;
 };
+
+/** Reserve the dashboard layout before the project loads. */
+export const ProjectLoading = ({ range = new DateRange("last30Days") }: { range?: DateRange }) => (
+	<div className={styles.project} role="status" aria-label="Loading project">
+		<div className={styles.projectReport} inert>
+			<div className={styles.projectHeader}>
+				<span className={styles.loadingTitle} />
+				<SelectRange range={range} onSelect={() => {}} disabled />
+			</div>
+			<SelectMetrics className={styles.projectStats} setMetric={() => {}} isLoading />
+			<div className={styles.loadingFilters}>
+				<SelectFilters value={[]} onChange={() => {}} />
+			</div>
+			<div className={styles.graphCard} />
+		</div>
+		<div className={styles.tables} aria-hidden="true">
+			{[0, 1].map((slot) => (
+				<article key={slot} className={cardStyles.card}>
+					<ReportTableLoading />
+				</article>
+			))}
+			<article className={cls(cardStyles.card, styles.geoCard)}>
+				<div className={styles.geoMap} />
+				<div className={styles.geoTable}>
+					<div>
+						<ReportTableLoading />
+					</div>
+				</div>
+			</article>
+			{[2, 3, 4, 5].map((slot) => (
+				<article key={slot} className={cardStyles.card}>
+					<ReportTableLoading />
+				</article>
+			))}
+		</div>
+	</div>
+);
+
+const ReportTableLoading = () => (
+	<>
+		<div className={cardStyles.dimensionHeader}>&nbsp;</div>
+		<div className={cardStyles.dimensionTable} />
+		<div className={cardStyles.cardFooter} />
+	</>
+);
 
 export const getDimensionFilter = (dimension: Dimension, value: string, propertyKey?: string): DimensionFilter => {
 	if (dimension === "property") return { dimension, key: propertyKey, filterType: "equal", value };
@@ -81,39 +127,12 @@ export const Project = () => {
 	}, [filters]);
 
 	const { metric, setMetric } = useMetric();
-	const { range, setRange, interval: graphInterval, setInterval: setGraphInterval } = useRange();
-	const previousGraphRange = useRef<{ before: DateRange; after: DateRange; interval: typeof graphInterval } | null>(
-		null,
-	);
-	const selectRange = useCallback(
-		(selected: DateRange) => {
-			previousGraphRange.current = null;
-			setRange(selected);
-		},
-		[setRange],
-	);
-	const selectGraphRange = useCallback(
-		(selected: DateRange) => {
-			const origin =
-				previousGraphRange.current?.after.serialize() === range.serialize() ? previousGraphRange.current : null;
-			previousGraphRange.current = {
-				before: origin?.before ?? range,
-				after: selected,
-				interval: origin?.interval ?? graphInterval,
-			};
-			setRange(selected);
-			setGraphInterval("auto");
-		},
-		[range, graphInterval, setRange, setGraphInterval],
-	);
-	const undoGraphRange = useCallback(() => {
-		if (previousGraphRange.current?.after.serialize() !== range.serialize()) return;
-		setRange(previousGraphRange.current.before);
-		setGraphInterval(previousGraphRange.current.interval);
-		previousGraphRange.current = null;
-	}, [range, setRange, setGraphInterval]);
+	const { range, setRange, interval, setInterval, selectGraphRange, undoGraphRange } = useRange();
+	const [comparison, setComparison] = useState<Comparison>({ mode: "off" });
+	const comparisonRange = getComparisonRange(range, comparison);
 
 	const { project, notFound } = useProject(projectId);
+	const [fadeTitle] = useState(() => project === undefined);
 	const visibleMetrics: Metric[] = useMemo(
 		() =>
 			metrics.filter(
@@ -136,11 +155,15 @@ export const Project = () => {
 	);
 	const {
 		graph,
+		availableIntervals,
+		comparisonGraph,
+		displayComparisonRange,
 		displayMetric,
 		displayRange,
 		displayInterval,
 		isUpdating: graphUpdating,
 		isLoading: graphLoading,
+		isError: graphError,
 	} = useProjectGraph({
 		projectId,
 		metric: reportMetric,
@@ -148,7 +171,8 @@ export const Project = () => {
 		filters: visibleFilters,
 		eventName,
 		enabled: Boolean(activeMetric),
-		interval: graphInterval,
+		interval,
+		comparisonRange,
 	});
 	const {
 		stats,
@@ -160,7 +184,15 @@ export const Project = () => {
 		filters: visibleFilters,
 		eventName,
 		enabled: Boolean(activeMetric),
+		comparisonRange,
 	});
+	const { data: live } = useCurrentVisitors(projectId);
+	const projectName = project?.displayName;
+	const currentVisitors = live?.count ?? 0;
+	useEffect(() => {
+		if (!projectName) return;
+		document.title = currentVisitors > 1 ? `${projectName} (${currentVisitors})` : projectName;
+	}, [projectName, currentVisitors]);
 
 	const query = useMemo<ProjectQuery>(
 		() => ({
@@ -170,8 +202,9 @@ export const Project = () => {
 			range,
 			filters: visibleFilters,
 			eventName,
+			comparisonRange,
 		}),
-		[project, reportMetric, range, visibleFilters, eventName],
+		[project, reportMetric, range, visibleFilters, eventName, comparisonRange],
 	);
 
 	useEffect(() => {
@@ -214,12 +247,7 @@ export const Project = () => {
 		return <div className={styles.notFound}>Project not found</div>;
 	}
 
-	if (!project)
-		return (
-			<div className={styles.loading} role="status" aria-label="Loading project">
-				<LoadingSpinner />
-			</div>
-		);
+	if (!project) return <ProjectLoading range={range} />;
 	const visibleDimensions = (items: Dimension[]) =>
 		items.filter(
 			(dimension) =>
@@ -243,8 +271,20 @@ export const Project = () => {
 		<div className={styles.project}>
 			<div className={styles.projectReport}>
 				<div className={styles.projectHeader}>
-					<ProjectHeader project={project} stats={stats} />
-					<SelectRange onSelect={selectRange} range={range} projectId={project.id} />
+					<ProjectHeader
+						project={project}
+						liveCount={live?.count}
+						fadeTitle={fadeTitle}
+						filters={visibleFilters}
+						onSelectPage={(row) => onSelectDimRow(row, "url")}
+					/>
+					<SelectRange
+						onSelect={setRange}
+						range={range}
+						projectId={project.id}
+						comparison={comparison}
+						onCompare={setComparison}
+					/>
 				</div>
 				<ProjectNav projectId={project.id} current="overview" />
 				<SelectMetrics
@@ -255,6 +295,7 @@ export const Project = () => {
 					setMetric={setMetric}
 					isLoading={statsLoading || statsUpdating}
 					eventName={eventName}
+					showAbsoluteChange={comparisonRange !== undefined}
 				/>
 				<SelectFilters
 					eventName={eventName}
@@ -271,17 +312,20 @@ export const Project = () => {
 					{activeMetric ? (
 						<LineGraph
 							data={graph}
+							comparisonData={comparisonGraph}
+							comparisonRange={displayComparisonRange}
 							title={eventMetricName(displayMetric, eventName)}
 							metric={displayMetric}
 							range={displayRange}
 							interval={displayInterval}
-							selectedInterval={graphInterval}
-							onSelectInterval={setGraphInterval}
-							onSelectRange={graphLoading || graphUpdating ? undefined : selectGraphRange}
+							selectedInterval={interval}
+							onSelectInterval={setInterval}
+							onSelectRange={selectGraphRange}
 							onUndoRange={undoGraphRange}
-							availableIntervals={range.getGraphIntervals()}
+							availableIntervals={availableIntervals}
 							isLoading={graphLoading}
 							isUpdating={graphUpdating}
+							hasError={graphError}
 						/>
 					) : (
 						<div className={styles.emptyReport}>No metrics are visible for this project.</div>

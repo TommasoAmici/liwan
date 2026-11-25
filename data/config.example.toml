@@ -58,6 +58,9 @@ listen = 9042  # The port to listen on (http)
 ## Spilling is capped at 90% of the free disk space by default. A very small
 ## limit can still make the heaviest reports fail.
 # memory_limit=2G
+## Time between periodic DuckDB checkpoints. Disabled by default. Use "0s" to disable.
+## Use fixed durations such as "5m" or "1h".
+# checkpoint_interval="5m"
 
 [limits]  # Resource limits
 ## Maximum time a report may run before timing out.
