@@ -16,35 +16,51 @@ The format is roughly based on the output of `git-cliff` and this project adhere
 Since this is not a library, this changelog focuses on the changes that are relevant to the end-users. For a detailed list of changes, see the commit history, which adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). New releases are created automatically when a new tag is pushed (Commit message: chore(release): vX.X.X).
 -->
 
-## [Unreleased]
+## [v1.10.0] - 2026-11-25
 
 ### ⚠️ Breaking Changes
 
-- `session_duration` (`LIWAN_SESSION_DURATION`) no longer accepts months or years. Use a fixed duration such as `30d` instead.
+- `session_duration` (`LIWAN_SESSION_DURATION`) no longer accepts months or
+  years. Use a fixed duration such as `30d`; the value must be between one hour
+  and 365 days.
 
 ### Features
 
-- Compare any dashboard date range with the previous period, last week, last year, or a custom start date. See the comparison in graphs, summary metrics, and breakdowns.
-- Added per-page live visitor counts breakdowns
-- Added pagination to Dashboard report cards
-- Improved the dashboard layout and world map, including map zooming and panning.
-- Switched the web interface to Google Sans Flex.
-- Switched to Font Awesome brand icons and added logos for Microsoft Edge and Windows.
-- Updated to DuckDB 2.0.1. Upgrading the event database's storage format is optional. To upgrade it, stop Liwan and run `liwan upgrade-duckdb`. The command keeps the original file as a `.old` backup. Older Liwan versions may not be able to open the upgraded file.
-- Added optional periodic DuckDB checkpoints via `duckdb.checkpoint_interval` (`LIWAN_DUCKDB_CHECKPOINT_INTERVAL`). Periodic checkpoints are off by default.
+- Compare a project dashboard's date range with the *Previous period*, *Last
+  week*, *Last year*, or a *Custom date…* you pick. Graphs, summary metrics, and
+  breakdowns show both periods, and the comparison stays off until you choose
+  one.
+- The live visitor count in the project header now opens *Pages*, which shows
+  how many visitors are on each page right now. It counts the last page each
+  visitor viewed in the past five minutes.
+- Breakdown cards page through their rows six at a time, with previous and next
+  buttons.
+- The dashboard has a new layout, and the world map zooms and pans.
+- Liwan now uses the Google Sans Flex typeface, and the brand icons include
+  Microsoft Edge and Windows.
+- Set `duckdb.checkpoint_interval` (`LIWAN_DUCKDB_CHECKPOINT_INTERVAL`) to
+  checkpoint the event database at an interval, for example `"5m"`. Checkpoints
+  are off by default, and `"0s"` keeps them off.
 
 ### Bug Fixes
 
-- Improved session and visit duration calculations, including when pageviews share a timestamp.
-- Fixed custom property presence filters for events with no properties.
-- Improved handling of daylight saving transitions in dashboard graphs and daily visitor grouping.
-- Kept GeoIP lookups available during MaxMind database updates and allowed failed updates to retry.
+- Session and visit durations are now right when two pageviews share a
+  timestamp.
+- Property filters that check whether a property is set now match events sent
+  without any properties.
+- Report graphs and daily visitor grouping no longer shift by an hour when the
+  clocks change for daylight saving time.
+- Location lookups keep working while the MaxMind database is being updated, and
+  a failed update is retried.
 
-## [v1.8.2] - 2026-10-29
+### Other
 
-### Bug Fixes
-
-- Fixed automatic MaxMind database updates failing when metadata contains numeric timestamps.
+- Liwan now bundles DuckDB 2.0.1. Databases created by earlier versions keep
+  working without changes, and rewriting their storage format stays optional:
+  stop Liwan and run `liwan upgrade-duckdb`. The command leaves an up-to-date
+  database alone, keeps the original as a `.old` backup when it converts one,
+  and a converted database does not open in a release that bundles the older
+  engine.
 
 ## [v1.9.0] - 2026-11-20
 
@@ -90,6 +106,12 @@ Since this is not a library, this changelog focuses on the changes that are rele
   working without changes.
 - `upgrade-duckdb` now reads the converted database back before replacing the
   original and reports how the file size changed.
+
+## [v1.8.2] - 2026-10-29
+
+### Bug Fixes
+
+- Fixed automatic MaxMind database updates failing when metadata contains numeric timestamps.
 
 ## [v1.8.1] - 2026-10-23
 
